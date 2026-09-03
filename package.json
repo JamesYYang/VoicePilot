@@ -9,7 +9,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "probe": "node --env-file=.env spike/probe.js"
+    "probe": "node --env-file=.env spike/probe.js",
+    "normalize": "node spike/normalize.js",
+    "smoke": "node --env-file=.env spike/smoke.js",
+    "demo": "node --env-file=.env demo/server.js"
   },
   "dependencies": {
     "ws": "^8.21.3"
