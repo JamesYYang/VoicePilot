@@ -1,0 +1,31 @@
+# ===== 凭证（绝不入库） =====
+.env
+.env.local
+*.key
+*.pem
+
+# ===== Node =====
+node_modules/
+dist/
+.npmrc
+
+# ===== Rust / Tauri（轨道 B 后续使用） =====
+target/
+**/*.rs.bk
+Cargo.lock.orig
+apps/*/src-tauri/gen/
+
+# ===== Spike 产物 =====
+# 录音音频体积大且含个人语音，不入库；
+# 但对应的 ground truth 转写文本（.txt）必须入库，测试集靠它复现。
+spike/audio/*.wav
+spike/audio/*.mp3
+spike/results/
+*.log
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

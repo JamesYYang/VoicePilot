@@ -1,0 +1,17 @@
+{
+  "name": "voicepilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VoicePilot — 说话即成文的桌面语音输入引擎",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "probe": "node --env-file=.env spike/probe.js"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}
