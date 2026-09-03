@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 /**
  * 解析 WAV 文件，返回 PCM 数据与格式信息。
@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
  * 的输入约定，也是本 spike 做延迟测量的前提：我们按「音频毫秒数 == 真实
  * 毫秒数」的假设回放音频，格式不符会让整个延迟计算失去意义。
  */
-export function readWav(path) {
+export function readWav(path, { strict = true } = {}) {
   const buffer = readFileSync(path);
 
   if (buffer.length < 12) throw new Error(`${path}: 文件过小，不是合法的 WAV`);
@@ -52,15 +52,113 @@ export function readWav(path) {
   if (fmt.bitsPerSample !== 16) problems.push(`位深 ${fmt.bitsPerSample}bit（应为 16）`);
 
   if (problems.length > 0) {
+    if (!strict) {
+      // 宽松模式：交给 normalize.js 转码，这里保留原始格式信息
+      const pcm = buffer.subarray(data.start, data.start + data.length);
+      return {
+        pcm,
+        sampleRate: fmt.sampleRate,
+        channels: fmt.channels,
+        bitsPerSample: fmt.bitsPerSample,
+        durationMs: (pcm.length / fmt.channels / (fmt.bitsPerSample / 8) / fmt.sampleRate) * 1000,
+        problems,
+      };
+    }
     throw new Error(
       `${path} 格式不符合要求：\n  - ${problems.join('\n  - ')}\n\n` +
-        `请用 ffmpeg 转码后重试：\n` +
+        `转码方式二选一：\n` +
+        `  node spike/normalize.js "${path}"\n` +
         `  ffmpeg -i "${path}" -ar 16000 -ac 1 -c:a pcm_s16le "${path.replace(/\.wav$/i, '')}-16k.wav"`
     );
   }
 
   const pcm = buffer.subarray(data.start, data.start + data.length);
-  return { pcm, sampleRate: fmt.sampleRate, durationMs: (pcm.length / 2 / fmt.sampleRate) * 1000 };
+  return {
+    pcm,
+    sampleRate: fmt.sampleRate,
+    channels: fmt.channels,
+    bitsPerSample: fmt.bitsPerSample,
+    durationMs: (pcm.length / 2 / fmt.sampleRate) * 1000,
+  };
+}
+
+/**
+ * 把任意 PCM WAV 转成 16kHz / 16bit / 单声道，供 probe 使用。
+ *
+ * 降采样做了抗混叠：整数倍抽取时先用 N 点移动平均低通（第一个零点恰好
+ * 落在目标奈奎斯特频率上），再抽取。语音能量集中在 100–3400Hz，8kHz 以上
+ * 几乎没有分量，因此这里的失真对 CER 的影响可忽略。
+ *
+ * 非整数倍采样率（如 44100Hz）只能线性插值，质量较差 —— 那种情况建议
+ * 直接用 ffmpeg 的 SoX 重采样器，测量数据更可信。
+ */
+export function normalizeToAsrInput(pcm, { sampleRate, channels, bitsPerSample }) {
+  if (bitsPerSample !== 16) {
+    throw new Error(`位深 ${bitsPerSample}bit 超出本工具的处理范围（仅支持 16bit），请用 ffmpeg 转码`);
+  }
+
+  let mono = pcm;
+  if (channels === 2) {
+    mono = Buffer.alloc(pcm.length / 2);
+    for (let i = 0; i < mono.length / 2; i++) {
+      const left = pcm.readInt16LE(i * 4);
+      const right = pcm.readInt16LE(i * 4 + 2);
+      mono.writeInt16LE(Math.round((left + right) / 2), i * 2);
+    }
+  } else if (channels > 2) {
+    throw new Error(`声道数 ${channels} 超出处理范围，请用 ffmpeg 转码`);
+  }
+
+  if (sampleRate === 16000) return { pcm: mono, quality: 'exact' };
+
+  const ratio = sampleRate / 16000;
+  const inSamples = mono.length / 2;
+  const outSamples = Math.floor(inSamples / ratio);
+  const out = Buffer.alloc(outSamples * 2);
+
+  if (Number.isInteger(ratio)) {
+    // 移动平均（抗混叠）后抽取
+    for (let i = 0; i < outSamples; i++) {
+      let sum = 0;
+      const base = i * ratio;
+      for (let j = 0; j < ratio; j++) {
+        const idx = Math.min(base + j, inSamples - 1);
+        sum += mono.readInt16LE(idx * 2);
+      }
+      out.writeInt16LE(Math.round(sum / ratio), i * 2);
+    }
+    return { pcm: out, quality: 'exact-decimation' };
+  }
+
+  // 非整数倍：线性插值。可用但会引入轻微高频损失
+  for (let i = 0; i < outSamples; i++) {
+    const pos = i * ratio;
+    const i0 = Math.floor(pos);
+    const frac = pos - i0;
+    const a = mono.readInt16LE(Math.min(i0, inSamples - 1) * 2);
+    const b = mono.readInt16LE(Math.min(i0 + 1, inSamples - 1) * 2);
+    out.writeInt16LE(Math.round(a + (b - a) * frac), i * 2);
+  }
+  return { pcm: out, quality: 'interpolated' };
+}
+
+/** 写出标准 16kHz/16bit/单声道 PCM WAV */
+export function writeWav(path, pcm, sampleRate = 16000) {
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8, 'ascii');
+  header.write('fmt ', 12, 'ascii');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // 单声道
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28); // byteRate
+  header.writeUInt16LE(2, 32); // blockAlign
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(pcm.length, 40);
+  writeFileSync(path, Buffer.concat([header, pcm]));
 }
 
 /**

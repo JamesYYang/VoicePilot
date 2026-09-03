@@ -113,17 +113,17 @@ function analyze(result, meta, sentAtOf) {
   }
   if (current && current.drafts.length > 0) sentences.push(current);
 
-  // 字级首次出现延迟。同一个 begin_time 的字会在多轮中间结果里重复出现，
-  // 只有第一次才是用户真正感知到的「这个字多久才冒出来」。
-  const seenWords = new Set();
-  const wordLatencies = [];
+  // 跟随延迟：每个事件里最新识别到的音频位置 → 该内容上屏的滞后。
+  // 这才是「屏幕落后说话多少」的正确度量。
+  //
+  // 不能用「每个字首次出现的延迟」：服务端每次推送中间结果都会重算整句的
+  // 字时间戳，begin_time 会漂移，导致同一批字被反复当成「新字」，算出上秒
+  // 级的假延迟（实测 P50 被抬高到 5404ms，与定稿延迟 744ms 自相矛盾）。
+  const followLatencies = [];
   for (const e of realEvents) {
-    for (const w of e.words) {
-      const key = `${w.begin_time}`;
-      if (seenWords.has(key)) continue;
-      seenWords.add(key);
-      wordLatencies.push(e.recvAtMs - sentAtOf(w.begin_time));
-    }
+    if (!e.words.length) continue;
+    const lastEnd = Math.max(...e.words.map((w) => w.end_time ?? w.begin_time));
+    followLatencies.push(e.recvAtMs - sentAtOf(lastEnd));
   }
 
   const sentenceFinalLatency = sentences
@@ -138,10 +138,13 @@ function analyze(result, meta, sentAtOf) {
   return {
     meta: { ...meta, audioDurationMs: Math.round(durationMs), eventCount: realEvents.length },
     latency: {
-      firstWordMs: wordLatencies.length ? wordLatencies[0] : null,
-      wordP50Ms: percentile(wordLatencies, 50),
-      wordP90Ms: percentile(wordLatencies, 90),
-      wordMaxMs: wordLatencies.length ? Math.max(...wordLatencies) : null,
+      firstWordMs: (() => {
+        const first = realEvents.find((e) => e.words.length > 0);
+        return first ? first.recvAtMs - sentAtOf(first.words[0].begin_time) : null;
+      })(),
+      followP50Ms: percentile(followLatencies, 50),
+      followP90Ms: percentile(followLatencies, 90),
+      followMaxMs: followLatencies.length ? Math.max(...followLatencies) : null,
       sentenceFinalP50Ms: percentile(sentenceFinalLatency, 50),
       sentenceFinalP90Ms: percentile(sentenceFinalLatency, 90),
     },
@@ -164,6 +167,15 @@ function analyze(result, meta, sentAtOf) {
           ? s.final.recvAtMs -
             sentAtOf(s.final.endTime ?? s.final.words[s.final.words.length - 1].end_time)
           : null,
+    })),
+    // 保留原始事件（含字级时间戳），便于事后复核指标口径，避免重复调用 API
+    rawEvents: realEvents.map((e) => ({
+      recvAtMs: e.recvAtMs,
+      text: e.text,
+      sentenceEnd: e.sentenceEnd,
+      beginTime: e.beginTime,
+      endTime: e.endTime,
+      words: e.words,
     })),
   };
 }
@@ -241,11 +253,13 @@ function printReport(report, hasTruth) {
   const { latency, jitter, meta } = report;
 
   console.log('── 延迟（音频发出 → 结果到达，含网络往返）');
-  console.log(`  首字            ${fmt(latency.firstWordMs)}`);
-  console.log(`  字级 P50        ${fmt(latency.wordP50Ms)}`);
-  console.log(`  字级 P90        ${fmt(latency.wordP90Ms)}`);
+  console.log(`  首字上屏        ${fmt(latency.firstWordMs)}`);
+  console.log(`  跟随 P50        ${fmt(latency.followP50Ms)}`);
+  console.log(`  跟随 P90        ${fmt(latency.followP90Ms)}`);
+  console.log(`  跟随最大        ${fmt(latency.followMaxMs)}`);
   console.log(`  句尾定稿 P50    ${fmt(latency.sentenceFinalP50Ms)}`);
   console.log(`  句尾定稿 P90    ${fmt(latency.sentenceFinalP90Ms)}`);
+  console.log('  （跟随 = 屏幕内容落后说话多少；定稿 = 说完到黑字出现）');
 
   console.log('\n── 中间结果抖动（灰字闪烁程度）');
   console.log(`  句子数          ${jitter.sentenceCount}`);
@@ -274,6 +288,22 @@ function printReport(report, hasTruth) {
     console.log(`    ${a.correctedText}`);
   } else {
     console.log('\n（未传 --truth，跳过准确率。提供 ground truth 才能算 CER 与修正提升）');
+  }
+
+  // 这是「看效果」最直接的部分：灰字如何一步步收敛成黑字
+  const showCount = Math.min(report.sentences.length, 8);
+  if (showCount > 0) {
+    console.log(`\n── 中间结果演变（灰字 → 黑字）`);
+    for (let i = 0; i < showCount; i++) {
+      const s = report.sentences[i];
+      const latency = s.finalLatencyMs != null ? `　定稿延迟 ${s.finalLatencyMs}ms` : '';
+      console.log(`\n  句 ${i + 1}（中间更新 ${s.draftUpdateCount} 次${latency}）`);
+      for (const d of s.draftSnapshots) console.log(`    灰 │ ${d.text}`);
+      if (s.finalText != null) console.log(`    黑 │ ${s.finalText}`);
+    }
+    if (report.sentences.length > showCount) {
+      console.log(`\n  …还有 ${report.sentences.length - showCount} 句，完整演变过程见 JSON`);
+    }
   }
 
   console.log('\n── 最终文本');
