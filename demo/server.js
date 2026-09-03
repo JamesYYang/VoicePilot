@@ -87,7 +87,14 @@ wss.on('connection', (browser) => {
       const s = new StreamingParaformer({
         apiKey,
         workspaceId,
-        onResult: (r) => send({ type: 'result', text: r.text, sentenceEnd: r.sentenceEnd }),
+        onResult: (r) =>
+          send({
+            type: 'result',
+            text: r.text,
+            sentenceEnd: r.sentenceEnd,
+            beginTime: r.beginTime,
+            endTime: r.endTime,
+          }),
         onDone: () => {
           send({ type: 'done' });
           if (session === s) session = null;

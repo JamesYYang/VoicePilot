@@ -35,6 +35,20 @@
     flex-wrap: wrap;
   }
   h1 { font-size: 17px; font-weight: 600; letter-spacing: .3px; }
+  h1 .cn {
+    margin-left: 11px;
+    padding-left: 11px;
+    border-left: 1px solid var(--border);
+    font-size: 15px;
+    font-weight: 500;
+    color: #93c5fd;
+    letter-spacing: 2px;
+  }
+  .slogan {
+    font-size: 14px;
+    color: #c4b5fd;
+    letter-spacing: 3px;
+  }
   .sub { font-size: 13px; color: var(--muted); }
 
   main {
@@ -64,6 +78,8 @@
   }
   .committed { color: var(--text); }
   .draft { color: var(--draft); }
+  .para { margin-bottom: 17px; }
+  .para:last-child { margin-bottom: 0; }
 
   footer {
     border-top: 1px solid var(--border);
@@ -158,8 +174,9 @@
 <body>
 
 <header>
-  <h1>VoicePilot 实时听写原型</h1>
-  <span class="sub">说话即成文 · 边说边出字</span>
+  <h1>VoicePilot<span class="cn">闻字</span></h1>
+  <span class="slogan">出口成章</span>
+  <span class="sub">实时听写原型</span>
 </header>
 
 <main>
@@ -199,6 +216,8 @@
         <li>按住空格说话，文字<b>实时上屏</b>，不是说完一段再出结果。</li>
         <li><b>灰色</b>是还在修正的中间结果，<b>白色</b>是停顿后定稿的句子——
             这就是「出口成章」的核心机制，眼睛能直接看到收敛过程。</li>
+        <li>说话时<b>停顿 1 秒以上</b>会自动另起一段，口述成果按段落组织。
+            连贯口述不会分段（实测连续说话时句间只有 240–620ms）。</li>
       </ul>
 
       <h3>延迟实测（同一链路、同一模型）</h3>
@@ -286,31 +305,51 @@ let audioReady = false;
 let ctx = null;
 let workletNode = null;
 let stream = null;
-let committed = [];
+let committed = [];   // { text, paraBreak }
 let draft = '';
+let lastEndTime = null;
+
+// 句间静音超过这个值就另起一段。
+// 阈值依据实测（见 spike/results）：连续口述时，服务端按语义断句，
+// 相邻句子的间隔只有 240–620ms；而真实思考/换气停顿通常在 1s 以上。
+// 取 800ms 作为分界——不会把连贯的口述切碎，也能接住明显的停顿。
+const PARA_BREAK_MS = 800;
+
+function fullText() {
+  return committed.map((s) => s.text).join('') + draft;
+}
 
 // ---------- 渲染 ----------
 
 function render() {
   el.stage.textContent = '';
 
-  const done = document.createElement('span');
-  done.className = 'committed';
-  done.textContent = committed.join('');
-  el.stage.appendChild(done);
-
-  if (draft) {
-    const d = document.createElement('span');
-    d.className = 'draft';
-    d.textContent = draft;
-    el.stage.appendChild(d);
+  const groups = [];
+  for (const s of committed) {
+    if (s.paraBreak || groups.length === 0) groups.push([]);
+    groups[groups.length - 1].push(s.text);
   }
+  if (groups.length === 0 && draft) groups.push([]);
+
+  groups.forEach((lines, i) => {
+    const para = document.createElement('div');
+    para.className = 'para';
+    para.textContent = lines.join('');
+
+    // 灰字始终接在最后一段末尾
+    if (draft && i === groups.length - 1) {
+      const d = document.createElement('span');
+      d.className = 'draft';
+      d.textContent = draft;
+      para.appendChild(d);
+    }
+    el.stage.appendChild(para);
+  });
 
   el.stage.classList.toggle('is-empty', !committed.length && !draft);
   el.stage.scrollTop = el.stage.scrollHeight;
 
-  const text = committed.join('') + draft;
-  el.charCount.textContent = text.length;
+  el.charCount.textContent = fullText().length;
   el.sentCount.textContent = committed.length;
 }
 
@@ -365,7 +404,13 @@ function connect() {
     }
     if (msg.type === 'result') {
       if (msg.sentenceEnd) {
-        if (msg.text.trim()) committed.push(msg.text);
+        if (msg.text.trim()) {
+          // 停顿够长就另起一段
+          const gap =
+            lastEndTime != null && msg.beginTime != null ? msg.beginTime - lastEndTime : null;
+          committed.push({ text: msg.text, paraBreak: gap != null && gap >= PARA_BREAK_MS });
+        }
+        if (msg.endTime != null) lastEndTime = msg.endTime;
         draft = '';
       } else {
         draft = msg.text;
@@ -506,12 +551,13 @@ el.btnClear.onclick = (e) => {
   e.currentTarget.blur();
   committed = [];
   draft = '';
+  lastEndTime = null;
   render();
 };
 
 el.btnCopy.onclick = async (e) => {
   e.currentTarget.blur();
-  const text = committed.join('') + draft;
+  const text = fullText();
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);

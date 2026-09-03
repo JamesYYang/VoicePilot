@@ -230,7 +230,13 @@ export class StreamingParaformer {
       } else if (event === 'result-generated') {
         const s = msg.payload?.output?.sentence ?? {};
         if (s.heartbeat) return;
-        this.#handlers.onResult?.({ text: s.text ?? '', sentenceEnd: s.sentence_end === true });
+        this.#handlers.onResult?.({
+          text: s.text ?? '',
+          sentenceEnd: s.sentence_end === true,
+          // 句级时间戳，客户端据此判断停顿长短以决定分段
+          beginTime: s.begin_time ?? null,
+          endTime: s.end_time ?? null,
+        });
       } else if (event === 'task-finished') {
         resolveFinished();
       } else if (event === 'task-failed') {
