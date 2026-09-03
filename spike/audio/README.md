@@ -4,15 +4,20 @@
 
 ## 格式要求
 
-必须是 **16kHz / 16bit / 单声道 PCM WAV**。脚本会严格校验，不符就报错并给转码命令。
+必须是 **16kHz / 16bit / 单声道 PCM WAV**。脚本会严格校验，不符就报错。
 
-转码（需要 ffmpeg，没有就 `winget install ffmpeg`）：
+转码用项目自带的工具，**不需要 ffmpeg**：
 
 ```bash
-ffmpeg -i 你的录音.m4a -ar 16000 -ac 1 -c:a pcm_s16le spike/audio/01-dictation.wav
+npm run normalize -- spike/audio/01-dictation.wav
+# 输出 01-dictation-16k.wav
 ```
 
-Windows 自带「录音机」录出来通常是 48kHz，必须转，否则按 16kHz 回放会导致音频变慢、延迟测量全错。
+它做两件事：立体声取平均合成单声道、48kHz→16kHz 整数倍抽取（带抗混叠移动平均，对语音质量影响可忽略）。
+
+Windows 自带「录音机」和手机录出来通常是 48kHz 立体声或 m4a，**必须转**——否则按 16kHz 回放会让音频变慢，延迟测量全部作废。
+
+采样率不是 16kHz 的整数倍时（如 44100Hz），工具会退化成线性插值并给出提示；那种情况建议装 ffmpeg 用它的 SoX 重采样器，数据更可信。
 
 ## 要录的五段
 
