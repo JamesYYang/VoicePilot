@@ -2,21 +2,24 @@ import { parseArgs } from 'node:util';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { readWav } from './lib/wav.js';
-import { ParaformerClient } from './lib/paraformer.js';
+import { AsrClient } from './lib/asr.js';
 
 const { values: args } = parseArgs({
   options: {
     audio: { type: 'string' },
     truth: { type: 'string' },
     'chunk-ms': { type: 'string', default: '100' },
-    model: { type: 'string', default: 'paraformer-realtime-v2' },
+    model: { type: 'string', default: 'qwen-audio-3.0-asr-flash-streaming' },
     semantic: { type: 'boolean', default: false },
     silence: { type: 'string' },
     'no-itn': { type: 'boolean', default: false },
     'no-punct': { type: 'boolean', default: false },
     disfluency: { type: 'boolean', default: false },
     lang: { type: 'string' },
-    vocab: { type: 'string' },
+    'vocab-id': { type: 'string' },
+    hotwords: { type: 'string' },
+    ctx: { type: 'string' },
+    'multi-threshold': { type: 'boolean', default: false },
     out: { type: 'string', default: 'spike/results' },
   },
 });
@@ -24,12 +27,16 @@ const { values: args } = parseArgs({
 if (!args.audio) {
   console.error('用法: npm run probe -- --audio spike/audio/xxx.wav [--truth spike/audio/xxx.txt]');
   console.error('\n常用开关:');
+  console.error('  --model paraformer-realtime-v2   换回旧模型做对比');
   console.error('  --semantic          开语义断句（准确率更高、延迟更高）');
   console.error('  --silence 800       VAD 断句静音阈值 ms，默认 1300，范围 200-6000');
-  console.error('  --no-itn            关闭逆文本规范化（看数字是否被转换）');
+  console.error('  --multi-threshold   多阈值模式，防止 VAD 断句切得过长（默认关）');
+  console.error('  --lang zh,en        语种提示（新模型最多 4 个）');
+  console.error('  --hotwords \'{"SKU":5}\'  即时热词，权重 1-5，50=超级热词（仅新模型）');
+  console.error('  --ctx "跨境电商术语"  Prompt 上下文增强（仅新模型，≤400 字符）');
+  console.error('  --no-itn            关闭逆文本规范化');
   console.error('  --no-punct          关闭标点预测');
   console.error('  --disfluency        过滤语气词（嗯、啊）');
-  console.error('  --lang zh,en        语种提示');
   process.exit(1);
 }
 
@@ -41,7 +48,15 @@ const params = {
 };
 if (args.silence) params.max_sentence_silence = Number(args.silence);
 if (args.lang) params.language_hints = args.lang.split(',');
-if (args.vocab) params.vocabulary_id = args.vocab;
+if (args['vocab-id']) params.vocabulary_id = args['vocab-id'];
+if (args.hotwords) params.vocabulary = JSON.parse(args.hotwords);
+if (args['multi-threshold']) params.multi_threshold_mode_enabled = true;
+
+// Prompt 上下文增强：把领域词表作为 user 轮次注入，模型每次请求自适应。
+// 仅 qwen-audio-3.0-asr-flash-streaming / fun-asr-realtime 支持。
+const input = args.ctx
+  ? { context: [{ role: 'user', content: [{ type: 'input_text', text: args.ctx }] }] }
+  : {};
 
 const { pcm, durationMs } = readWav(args.audio);
 const chunkMs = Number(args['chunk-ms']);
@@ -49,9 +64,10 @@ const chunkMs = Number(args['chunk-ms']);
 console.log(`音频: ${basename(args.audio)}  时长 ${(durationMs / 1000).toFixed(1)}s  分块 ${chunkMs}ms`);
 console.log(`模型: ${args.model}`);
 console.log(`参数: ${JSON.stringify(params)}`);
+if (Object.keys(input).length) console.log(`上下文: ${JSON.stringify(input)}`);
 console.log('');
 
-const client = new ParaformerClient({
+const client = new AsrClient({
   apiKey: process.env.DASHSCOPE_API_KEY,
   workspaceId: process.env.DASHSCOPE_WORKSPACE_ID,
   model: args.model,
@@ -63,6 +79,7 @@ const startedAt = Date.now();
 const result = await client.recognize({
   pcm,
   params,
+  input,
   chunkMs,
   onChunk: (i) => {
     if (i === 0) process.stdout.write('识别中 ');
@@ -74,7 +91,7 @@ process.stdout.write(` 完成 (${((Date.now() - startedAt) / 1000).toFixed(1)}s)
 
 const report = analyze(
   result,
-  { totalChunks, durationMs, params, model: args.model, audio: args.audio },
+  { totalChunks, durationMs, params, input, model: args.model, audio: args.audio },
   (ms) => result.playback.sentAtOf(ms)
 );
 
@@ -186,10 +203,15 @@ function analyze(result, meta, sentAtOf) {
  * 这是本 spike 的核心：sentence_end=false 的中间结果就是 draft，
  * sentence_end=true 就是 corrected。两者的字准确率差，决定了我们是否
  * 还需要自建 2-pass 修正层。
+ *
+ * 入参是 report.sentences（analyze 映射后的形状），不是 analyze 内部的
+ * 原始 sentences —— 字段名是 draftSnapshots / finalText，不是 drafts / final。
  */
 function scoreAgainstTruth(sentences, truth) {
-  const lastDraft = sentences.map((s) => (s.drafts.length ? s.drafts[s.drafts.length - 1].text : '')).join('');
-  const corrected = sentences.map((s) => s.final?.text ?? '').join('');
+  const lastDraft = sentences
+    .map((s) => (s.draftSnapshots.length ? s.draftSnapshots[s.draftSnapshots.length - 1].text : ''))
+    .join('');
+  const corrected = sentences.map((s) => s.finalText ?? '').join('');
 
   const truthChars = [...truth];
   const score = (text) => {

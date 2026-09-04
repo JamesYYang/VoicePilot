@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { StreamingParaformer } from '../spike/lib/paraformer.js';
+import { StreamingAsr } from '../spike/lib/asr.js';
 
 /**
  * demo 转发层。
@@ -22,6 +22,30 @@ const ASR_PARAMS = {
   inverse_text_normalization_enabled: true,
   punctuation_prediction_enabled: true,
   disfluency_removal_enabled: false,
+};
+
+/**
+ * Prompt 上下文增强：把领域词表作为 user 轮次注入，模型每次请求自适应。
+ *
+ * 2026-09-04 实测（03-mixed / 04-terms，各对照无增强基线）：
+ *   英文术语命中从 5/9 提到 9/9（SKU / CTR / A+ / ACOS / GMV 这些缩写终于出对
+ *   了大小写），且不会像「请用大写英文输出」那样把品牌名全改成 TEMU / SHOPIFY。
+ *   所以这里把「缩写」和「品牌名」分开指令。
+ *
+ * 约束（官方文档）：上下文最多 5 条消息，总长 ≤400 字符。
+ *
+ * 注意：这是**跨境电商**词表。它只在这个领域内是增益——换成别的领域要重写，
+ * 否则会像热词那样把模型往错误的方向偏置（实测热词会诱发幻觉，别用 vocabulary）。
+ */
+const ASR_CONTEXT_TEXT =
+  '跨境电商场景。缩写术语请用全大写英文输出：FBA、ACOS、SKU、CTR、GMV、ROI、Prime Day。' +
+  '品牌与平台名请用英文原文、仅首字母大写输出：Amazon、Walmart、Temu、Shopify、Anker、Shein、TikTok Shop。' +
+  '普通英文词用小写：listing、keyword、review。';
+
+const ASR_INPUT = {
+  context: [
+    { role: 'user', content: [{ type: 'input_text', text: ASR_CONTEXT_TEXT }] },
+  ],
 };
 
 const apiKey = process.env.DASHSCOPE_API_KEY;
@@ -84,7 +108,7 @@ wss.on('connection', (browser) => {
       // 前者先触发，连接层错误（握手失败/超时）则只有后者。用标记避免重复报错。
       let notified = false;
 
-      const s = new StreamingParaformer({
+      const s = new StreamingAsr({
         apiKey,
         workspaceId,
         onResult: (r) =>
@@ -113,7 +137,7 @@ wss.on('connection', (browser) => {
       session = s;
 
       try {
-        await s.start(ASR_PARAMS);
+        await s.start(ASR_PARAMS, ASR_INPUT);
         console.log('[会话] 开始');
         send({ type: 'ready' });
       } catch (err) {

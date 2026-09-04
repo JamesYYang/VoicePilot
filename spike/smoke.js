@@ -1,4 +1,4 @@
-import { ParaformerClient } from './lib/paraformer.js';
+import { AsrClient } from './lib/asr.js';
 
 /**
  * 链路自检：用 1 秒静音跑完整个 WebSocket 流程，不验证识别质量。
@@ -25,7 +25,7 @@ console.log('');
 // 1 秒静音：16kHz × 16bit × 1声道 = 32000 字节
 const silence = Buffer.alloc(16000 * 2);
 
-const client = new ParaformerClient({ apiKey, workspaceId });
+const client = new AsrClient({ apiKey, workspaceId });
 
 console.log('1/3 建立 WebSocket 连接并发送 run-task...');
 const t0 = Date.now();
@@ -60,7 +60,7 @@ function diagnose(err, workspaceId) {
     console.error('  → 凭证被拒。依次检查：');
     console.error('    1. DASHSCOPE_API_KEY 是否完整复制（sk- 开头，无多余空格）');
     console.error('    2. 该 Key 是否属于 DASHSCOPE_WORKSPACE_ID 对应的业务空间');
-    console.error('    3. 账号是否已开通「实时语音识别 Paraformer」服务');
+    console.error('    3. 账号是否已开通「实时语音识别」服务');
   } else if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)) {
     console.error('  → 域名解析失败，几乎可以肯定是 DASHSCOPE_WORKSPACE_ID 填错。');
     console.error(`    当前拼接出的域名: ${workspaceId}.cn-beijing.maas.aliyuncs.com`);

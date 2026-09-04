@@ -2,14 +2,25 @@ import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { PacedPlayback, sleep } from './wav.js';
 
-const DEFAULT_MODEL = 'paraformer-realtime-v2';
+/**
+ * 默认模型：qwen-audio-3.0-asr-flash-streaming。
+ *
+ * 2026-09-04 从 paraformer-realtime-v2 切过来。阿里云官方文档已把 Paraformer
+ * 系列标为「较早一代，建议迁移」，新模型独占三项能力：即时热词（vocabulary，
+ * 无需预建词表）、Prompt 上下文增强（input.context）、language_hints 支持 4 个
+ * 语种。代价是单价从 0.00024 元/秒涨到 0.00033 元/秒（贵 37.5%）。
+ */
+const DEFAULT_MODEL = 'qwen-audio-3.0-asr-flash-streaming';
 
 function buildUrl(workspaceId) {
   return `wss://${workspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`;
 }
 
 /**
- * 百炼 Paraformer 实时语音识别 WebSocket 客户端。
+ * 百炼实时语音识别 WebSocket 客户端。
+ *
+ * 同时服务 Paraformer 与 Qwen-Audio-3.0-ASR-Flash-Streaming：两者的端点、
+ * 握手方式、事件名与结果结构完全一致，差别只在 model 字段与 parameters 取值。
  *
  * 交互时序（官方文档）：
  *   连接 → run-task → [task-started] → 持续发二进制音频 + 收 result-generated
@@ -17,7 +28,7 @@ function buildUrl(workspaceId) {
  *
  * 每个收到的事件都会打上本地接收时刻（recvAtMs），这是延迟测量的基础。
  */
-export class ParaformerClient {
+export class AsrClient {
   #apiKey;
   #workspaceId;
   #model;
@@ -40,11 +51,12 @@ export class ParaformerClient {
    *
    * @param pcm      16kHz/16bit/单声道 PCM 数据
    * @param params   传给 run-task 的 parameters（覆盖默认值）
+   * @param input    传给 run-task 的 input（用于 Prompt 上下文增强）
    * @param chunkMs  音频分块毫秒数
    * @param onChunk  每发出一块音频后的回调，用于进度显示
    * @returns 事件流与关键时间点
    */
-  async recognize({ pcm, params = {}, chunkMs = 100, onChunk } = {}) {
+  async recognize({ pcm, params = {}, input = {}, chunkMs = 100, onChunk } = {}) {
     const taskId = randomUUID();
     const url = this.#buildUrl();
     const durationMs = pcm.length / 32; // 16000Hz × 2字节/ms
@@ -89,6 +101,9 @@ export class ParaformerClient {
         resolveStarted();
       } else if (event === 'result-generated') {
         const sentence = msg.payload?.output?.sentence ?? {};
+        // 句首标记与静音段都会产生「无文本无字」的空事件，丢弃：它们不携带
+        // 识别内容，留着只会虚增「每句中间更新次数」，让新旧模型无法对比。
+        if (!sentence.text && !sentence.words?.length) return;
         if (msg.payload?.output?.usage) lastUsage = msg.payload.output.usage;
         events.push({
           recvAtMs,
@@ -97,6 +112,7 @@ export class ParaformerClient {
           heartbeat: sentence.heartbeat === true,
           beginTime: sentence.begin_time ?? null,
           endTime: sentence.end_time ?? null,
+          sentenceId: sentence.sentence_id ?? null,
           words: sentence.words ?? [],
         });
       } else if (event === 'task-finished') {
@@ -123,7 +139,7 @@ export class ParaformerClient {
           task: 'asr',
           function: 'recognition',
           model: this.#model,
-          input: {},
+          input,
           parameters: { format: 'pcm', sample_rate: 16000, ...params },
         },
       })
@@ -170,11 +186,11 @@ export class ParaformerClient {
 /**
  * 流式会话：由调用方手动控制「开始 → 持续送音频 → 停止」。
  *
- * 与 ParaformerClient.recognize() 的区别在于音频来源——recognize() 喂的是
+ * 与 AsrClient.recognize() 的区别在于音频来源——recognize() 喂的是
  * 一段已知的 PCM，而这里是实时麦克风，何时开始与结束由用户按键决定。
  * 用于 demo 的浏览器转发层。
  */
-export class StreamingParaformer {
+export class StreamingAsr {
   #apiKey;
   #workspaceId;
   #model;
@@ -198,7 +214,7 @@ export class StreamingParaformer {
     return this.#state;
   }
 
-  async start(params = {}) {
+  async start(params = {}, input = {}) {
     if (this.#state !== 'idle') throw new Error(`状态 ${this.#state} 下不能重新开始`);
     this.#state = 'starting';
     this.#taskId = randomUUID();
@@ -222,7 +238,12 @@ export class StreamingParaformer {
     this.#finishedPromise = finishedPromise;
 
     ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString('utf8'));
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString('utf8'));
+      } catch {
+        return;
+      }
       const event = msg?.header?.event;
 
       if (event === 'task-started') {
@@ -230,6 +251,7 @@ export class StreamingParaformer {
       } else if (event === 'result-generated') {
         const s = msg.payload?.output?.sentence ?? {};
         if (s.heartbeat) return;
+        if (!s.text && !s.words?.length) return;
         this.#handlers.onResult?.({
           text: s.text ?? '',
           sentenceEnd: s.sentence_end === true,
@@ -257,7 +279,7 @@ export class StreamingParaformer {
           task: 'asr',
           function: 'recognition',
           model: this.#model,
-          input: {},
+          input,
           parameters: { format: 'pcm', sample_rate: 16000, ...params },
         },
       })
