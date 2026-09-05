@@ -9,6 +9,11 @@ node_modules/
 dist/
 .npmrc
 
+# 例外：app/.npmrc 只配国内镜像地址（electron / electron-builder 二进制），
+# 不含任何凭证，必须入库 —— 否则重装依赖或跑 CI 时会因连不上 GitHub 而
+# 下载 Electron 二进制失败，且报错是 npm install 成功但 electron 起不来。
+!app/.npmrc
+
 # ===== Rust / Tauri（轨道 B 后续使用） =====
 target/
 **/*.rs.bk

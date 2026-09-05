@@ -1,0 +1,30 @@
+{
+  "name": "voicepilot-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VoicePilot 桌面端 — Electron + React",
+  "main": "electron/main.js",
+  "scripts": {
+    "build": "vite build",
+    "start": "vite build && electron .",
+    "hmr": "vite",
+    "dev": "VP_DEV_URL=http://localhost:5173 electron .",
+    "typecheck": "tsc --noEmit",
+    "dist:win": "vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}
