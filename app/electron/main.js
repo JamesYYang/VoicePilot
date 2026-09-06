@@ -267,9 +267,9 @@ function createUiTestWindow() {
 // ---------------------------------------------------------------- 托盘与快捷键
 
 function createTray() {
-  // TODO: 需要真实图标资源（Windows .ico / macOS 16x16 模板图）。
-  // 空图能撑起托盘菜单，但托盘区看不到图标。
-  tray = new Tray(nativeImage.createEmpty());
+  // Windows 托盘吃 .ico（多尺寸内嵌，会按 DPI 自动挑）；macOS 等拿到 Mac 后再单独做 template 图。
+  const trayIcon = nativeImage.createFromPath(join(HERE, '..', 'build', 'voicepilot-icon.ico'));
+  tray = new Tray(trayIcon.isEmpty() ? nativeImage.createEmpty() : trayIcon);
   tray.setToolTip('VoicePilot 闻字');
   tray.setContextMenu(
     Menu.buildFromTemplate([

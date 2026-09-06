@@ -28,6 +28,7 @@ export function createStudioWindow({ attachDevLogging }) {
     minHeight: 480,
     title: 'VoicePilot 主应用',
     backgroundColor: '#ffffff', // 亮色（spec §2）
+    icon: join(HERE, '..', 'build', 'voicepilot-icon-256.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(HERE, 'preload.cjs'),
