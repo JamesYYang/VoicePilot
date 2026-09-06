@@ -2,6 +2,8 @@ import { app, clipboard, ipcMain, shell } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
+import { createStudioWindow } from './studio.js';
+import { SCENES, TONES } from './llm/prompt.js';
 
 /**
  * 所有 IPC 的注册点。main.js 只管应用外壳（窗口、托盘、快捷键、生命周期），
@@ -10,7 +12,13 @@ import { SessionMachine } from './session/machine.js';
  * ⚠️ 方向性是有讲究的：API Key 只出现在主进程，渲染进程**只能**拿到音频与状态，
  * 拿不到任何凭据（PRD §5.8）。所以这里绝不能出现把 creds 发回去的通道。
  */
-export function registerIpc({ getBar, requestQuit }) {
+/**
+ * 打开主应用时带过去的待润色文本。悬浮条每次点「润色」都会覆盖它，
+ * 主应用挂载时经 vp:studio/sync 拉走。
+ */
+let pendingStudioText = '';
+
+export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
   /**
    * 主进程 → 渲染进程。
    * 悬浮条可能还没加载完，也可能已被关闭，发送前必须检查。
@@ -117,6 +125,28 @@ export function registerIpc({ getBar, requestQuit }) {
     const bar = getBar();
     bar?.setIgnoreMouseEvents(Boolean(passthrough), { forward: true });
   });
+
+  // ---------------------------------------------------------------- 主应用（Studio）
+
+  /** 打开主应用，把悬浮条刚转出来的文本带过去。 */
+  ipcMain.handle('vp:studio/open', (_e, text) => {
+    pendingStudioText = String(text ?? '');
+    createStudioWindow({ attachDevLogging });
+    return true;
+  });
+
+  /** 主应用挂载时拉一次：待润色文本 + 场景/语气选项。 */
+  ipcMain.handle('vp:studio/sync', () => ({
+    text: pendingStudioText,
+    scenes: SCENES,
+    tones: TONES,
+  }));
+
+  /**
+   * 润色入口。Task 5 接入真正的流式润色；本任务先 stub，保证界面点
+   * 「润色」有处可调、链路能通。
+   */
+  ipcMain.handle('vp:polish/start', async () => {});
 
   return machine;
 }

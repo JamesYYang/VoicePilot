@@ -53,6 +53,14 @@ interface VoicePilotBridge {
   revealPath(path: string): void;
   /** 退出应用（托盘图标目前是空图，点不到菜单里的退出） */
   quit(): void;
+
+  // —— 主应用（Studio）——
+  /** 打开主应用并带入待润色文本 */
+  openStudio(text: string): Promise<boolean>;
+  /** 主应用挂载时拉 {text, scenes, tones} */
+  syncStudio(): Promise<{ text: string; scenes: string[]; tones: string[] }>;
+  /** 发起润色（Task 5 接流式；本任务 stub） */
+  startPolish(payload: { text: string; scene: string; tone: string }): Promise<void>;
 }
 
 interface Window {

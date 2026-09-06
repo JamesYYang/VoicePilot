@@ -149,4 +149,21 @@ contextBridge.exposeInMainWorld('voicepilot', {
   setMousePassthrough(passthrough) {
     ipcRenderer.send('vp:mouse-passthrough', Boolean(passthrough));
   },
+
+  // ---------------------------------------------------------------- 主应用（Studio）
+
+  /** 打开主应用并带入待润色文本。 */
+  openStudio(text) {
+    return ipcRenderer.invoke('vp:studio/open', text);
+  },
+
+  /** 主应用挂载时拉 {text, scenes, tones}。 */
+  syncStudio() {
+    return ipcRenderer.invoke('vp:studio/sync');
+  },
+
+  /** 发起润色（Task 5 接流式；本任务 stub）。 */
+  startPolish(payload) {
+    return ipcRenderer.invoke('vp:polish/start', payload);
+  },
 });

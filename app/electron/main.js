@@ -315,7 +315,7 @@ app.whenReady().then(async () => {
   // 协议与 IPC 必须先注册：自测窗口也走 app:// 协议，也要用到 vp:copy 等通道。
   // 注册动作本身没有副作用，放在分支之前最省心。
   registerAppProtocol();
-  const machine = registerIpc({ getBar: () => bar, requestQuit });
+  const machine = registerIpc({ getBar: () => bar, requestQuit, attachDevLogging });
 
   // 前两个自测都是「不建窗口、跑完就退」，可以在无人值守的机器上跑，
   // 验的也都是主进程的真实路径。

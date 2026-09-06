@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
+import PolishView from './PolishView';
 
 /**
  * 主应用（Studio）外壳 —— 润色工作区的骨架（Task 3）。
@@ -20,7 +21,7 @@ const NAV: { key: View; label: string }[] = [
   { key: 'settings', label: '设置' },
 ];
 
-export default function Studio() {
+export default function Studio({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
   const [view, setView] = useState<View>('polish');
 
   return (
@@ -39,8 +40,7 @@ export default function Studio() {
 
       <main style={styles.content}>
         {view === 'polish' ? (
-          // Task 4 换成 <PolishView />。现在先占位，让路由/窗口先跑通。
-          <div style={styles.polishPlaceholder}>润色工作区</div>
+          <PolishView bridge={bridge} />
         ) : (
           <div style={styles.placeholder}>待实现</div>
         )}
@@ -84,14 +84,10 @@ const styles = {
     flex: 1,
     minWidth: 0,
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  polishPlaceholder: {
-    fontSize: 16,
-    color: '#4b5563',
+    flexDirection: 'column',
   },
   placeholder: {
+    margin: 'auto',
     color: '#9ca3af',
   },
 } satisfies Record<string, CSSProperties | ((active: boolean) => CSSProperties)>;

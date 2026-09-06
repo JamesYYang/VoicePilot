@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import App from '../App';
+import Studio from '../studio/Studio';
 
 /**
  * 悬浮条界面自测。用法：
@@ -281,6 +282,54 @@ export async function runUiTest() {
   await sleep(5600); // ERROR_HOLD_MS = 5000 + 缓冲
   check('停留窗口结束后自动隐藏', container.textContent === '',
     JSON.stringify(container.textContent));
+
+  // ---- 9. Studio（润色工作区）----
+  // 换一个干净的容器：Studio 与悬浮条 App 是两棵独立的树，不能共用一个 root。
+  const studioContainer = document.createElement('div');
+  document.body.appendChild(studioContainer);
+
+  // 用对象属性兜住调用载荷：TS 会把 `let x = null` 收窄成 null（闭包里的
+  // 赋值不在它的流分析里），属性访问则不会被这样收窄。
+  const polishCall: { payload: { text: string; scene: string; tone: string } | null } = {
+    payload: null,
+  };
+  // 给 Studio 注入假 bridge（与 App 同款模式），不动只读的 window.voicepilot。
+  const studioBridge = {
+    ...real,
+    syncStudio: () =>
+      Promise.resolve({ text: '测试原文', scenes: ['邮件'], tones: ['正式'] }),
+    startPolish: (p: { text: string; scene: string; tone: string }) => {
+      polishCall.payload = p;
+      return Promise.resolve();
+    },
+  };
+
+  createRoot(studioContainer).render(<Studio bridge={studioBridge} />);
+  await waitFor(() => studioContainer.querySelector('textarea')?.value === '测试原文');
+  check(
+    'Studio 编辑器初值为 syncStudio 下发的文本',
+    studioContainer.querySelector('textarea')?.value === '测试原文',
+    JSON.stringify(studioContainer.querySelector('textarea')?.value)
+  );
+  check(
+    'Studio 有场景下拉',
+    studioContainer.querySelector('[data-testid="polish-scene"]') !== null
+  );
+  check(
+    'Studio 有语气下拉',
+    studioContainer.querySelector('[data-testid="polish-tone"]') !== null
+  );
+
+  // 点「润色」→ 应调 startPolish（本任务 stub，只验调用与载荷）
+  studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.click();
+  await flush();
+  check(
+    '点润色调用了 startPolish 且载荷正确',
+    polishCall.payload?.text === '测试原文' &&
+      polishCall.payload?.scene === '邮件' &&
+      polishCall.payload?.tone === '正式',
+    JSON.stringify(polishCall.payload)
+  );
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
