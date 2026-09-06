@@ -60,6 +60,7 @@ export async function runUiTest() {
   let toggleCount = 0;
   // 用对象 holder 而不是 `let x: string|null`：TS 会把它在流里收窄成 null/never
   const openStudioCtl: { arg: string | null } = { arg: null };
+  const historySaveCtl: { payload: { text: string } | null } = { payload: null };
   let captureStarted = false;
   let captureStopped = false;
   // 初值给空函数而不是 null：这样类型是「永远可调用」，
@@ -91,9 +92,13 @@ export async function runUiTest() {
     // 表现是「点了复制毫无反应」，且控制台没有一行相关报错。
     copy: (text: string) => real.copy(text),
     reportPainted: (at: number) => real.reportPainted(at),
-    openStudio: (text: string) => {
-      openStudioCtl.arg = text;
+    openStudio: (payload: { text: string; historyId?: number }) => {
+      openStudioCtl.arg = payload.text;
       return Promise.resolve(true);
+    },
+    historySave: (payload: { text: string }) => {
+      historySaveCtl.payload = payload;
+      return Promise.resolve({ id: 1 });
     },
     toggle: () => {
       toggleCount += 1;
@@ -168,8 +173,8 @@ export async function runUiTest() {
   const textEl = container.querySelector('[data-testid="text"]');
   check('草稿上屏', textEl?.textContent?.includes('今天我们要讨论') === true,
     JSON.stringify(textEl?.textContent));
-  check('草稿是灰字（有 draft 节点）', container.querySelector('span[style*="139"]') !== null ||
-    textEl?.innerHTML.includes('8b93a7') === true);
+  check('草稿是灰字（有 draft 节点）', container.querySelector('span[style*="156"]') !== null ||
+    textEl?.innerHTML.includes('9ca3af') === true);
 
   // ---- 5. 定稿 + 分段 ----
   fire('partial', {
@@ -242,9 +247,12 @@ export async function runUiTest() {
   }
   check('复制内容与界面文本一致', expectedText.includes('三件事'));
 
-  // ---- 6.5 润色：打开主应用并关闭悬浮条（两者不同时出现）----
+  // ---- 6.5 润色 + 历史保存：进入 reviewing 时原文已写入历史一次 ----
   fire('state', { state: 'reviewing', notice: null, truncated: false });
   await flush();
+  check('reviewing 时已调用 historySave 且带全文',
+    (historySaveCtl.payload?.text ?? '').includes('三件事'),
+    JSON.stringify(historySaveCtl.payload));
   toggleCount = 0;
   openStudioCtl.arg = null;
   clickButton('润色');
@@ -309,9 +317,8 @@ export async function runUiTest() {
 
   // 用对象属性兜住调用载荷：TS 会把 `let x = null` 收窄成 null（闭包里的
   // 赋值不在它的流分析里），属性访问则不会被这样收窄。
-  const polishCall: { payload: { text: string; scene: string; tone: string } | null } = {
-    payload: null,
-  };
+  const polishCall: { payload: { text: string; scene: Preset; tone: Preset } | null } = { payload: null };
+  const adoptCall: { payload: { polished: string; scene: string; tone: string } | null } = { payload: null };
   // 给 Studio 注入假 bridge（与 App 同款模式），不动只读的 window.voicepilot。
   // 用对象属性兜住刷新监听器：TS 会把 `let x = null` 收窄成 null，
   // 属性访问则不会被这样收窄。
@@ -322,28 +329,28 @@ export async function runUiTest() {
   const studioError: { cb: ((p: { message: string }) => void) | null } = { cb: null };
   const studioBridge = {
     ...real,
-    onStudioRefresh: (cb: (p: { text: string }) => void) => {
-      studioRefresh.cb = cb;
-      return () => {};
-    },
+    onStudioRefresh: (cb: (p: { text: string }) => void) => { studioRefresh.cb = cb; return () => {}; },
     syncStudio: () =>
-      Promise.resolve({ text: '测试原文', scenes: ['邮件'], tones: ['正式'] }),
-    startPolish: (p: { text: string; scene: string; tone: string }) => {
+      Promise.resolve({
+        text: '测试原文',
+        scenes: [{ id: 1, name: '邮件', description: '', is_builtin: 1 }],
+        tones: [{ id: 5, name: '正式', description: '', is_builtin: 1 }],
+        defaultScene: null,
+      }),
+    startPolish: (p: { text: string; scene: Preset; tone: Preset }) => {
       polishCall.payload = p;
       return Promise.resolve(true);
     },
-    onPolishDelta: (cb: (p: { text: string }) => void) => {
-      studioDelta.cb = cb;
-      return () => {};
+    adoptPolish: (p: { polished: string; scene: string; tone: string }) => {
+      adoptCall.payload = p;
+      return Promise.resolve(true);
     },
-    onPolishDone: (cb: () => void) => {
-      studioDone.cb = cb;
-      return () => {};
-    },
-    onPolishError: (cb: (p: { message: string }) => void) => {
-      studioError.cb = cb;
-      return () => {};
-    },
+    onPolishDelta: (cb: (p: { text: string }) => void) => { studioDelta.cb = cb; return () => {}; },
+    onPolishDone: (cb: () => void) => { studioDone.cb = cb; return () => {}; },
+    onPolishError: (cb: (p: { message: string }) => void) => { studioError.cb = cb; return () => {}; },
+    listPresets: () => Promise.resolve([{ id: 1, name: '邮件', description: '', is_builtin: 1 }]),
+    savePreset: () => Promise.resolve({ id: 2 }),
+    deletePreset: () => Promise.resolve(true),
   };
 
   createRoot(studioContainer).render(<Studio bridge={studioBridge} />);
@@ -368,8 +375,8 @@ export async function runUiTest() {
   check(
     '点润色调用了 startPolish 且载荷正确',
     polishCall.payload?.text === '测试原文' &&
-      polishCall.payload?.scene === '邮件' &&
-      polishCall.payload?.tone === '正式',
+      polishCall.payload?.scene?.name === '邮件' &&
+      polishCall.payload?.tone?.name === '正式',
     JSON.stringify(polishCall.payload)
   );
 
@@ -420,6 +427,11 @@ export async function runUiTest() {
     studioContainer.querySelector('[data-testid="polish-output"]')?.textContent === '',
     JSON.stringify(studioContainer.querySelector('[data-testid="polish-output"]')?.textContent)
   );
+  check('采用后调用了 adoptPolish 回写',
+    adoptCall.payload?.polished === '润色后的第一句' &&
+      adoptCall.payload?.scene === '邮件' &&
+      adoptCall.payload?.tone === '正式',
+    JSON.stringify(adoptCall.payload));
 
   // ---- 12. 润色失败：error 事件 → 显示错误 + 按钮恢复（Task 5 修复，单路径 emit）----
   studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.click();
