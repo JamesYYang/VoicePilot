@@ -232,6 +232,15 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     prevStateRef.current = snap.state;
   }, [snap.state]);
 
+  const fullText = useMemo(() => {
+    const parts: string[] = [];
+    for (const c of committed) {
+      parts.push(c.text);
+      if (c.paraBreak) parts.push('\n');
+    }
+    return [...parts, draft].join('');
+  }, [committed, draft]);
+
   // reviewing 时把原文写入历史一次。文本归渲染进程所有，主进程只落库。
   // 每次会话只存一次：historySavedRef 在 warming 时重置。
   useEffect(() => {
@@ -257,15 +266,6 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     const el = textRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [draft, committed, snap.state]);
-
-  const fullText = useMemo(() => {
-    const parts: string[] = [];
-    for (const c of committed) {
-      parts.push(c.text);
-      if (c.paraBreak) parts.push('\n');
-    }
-    return [...parts, draft].join('');
-  }, [committed, draft]);
 
   const paragraphs = useMemo(() => {
     // 按 paraBreak 分组，渲染成段落
