@@ -65,6 +65,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
   }, [vp]);
 
   const run = () => {
+    if (!scene || !tone) return;
     setOutput('');
     setPolishError(null);
     setPolishing(true);
@@ -113,7 +114,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           data-testid="polish-run"
           style={styles.run}
           onClick={run}
-          disabled={text.trim().length === 0 || polishing}
+          disabled={text.trim().length === 0 || polishing || !scene || !tone}
         >
           {polishing ? '润色中…' : '润色'}
         </button>
