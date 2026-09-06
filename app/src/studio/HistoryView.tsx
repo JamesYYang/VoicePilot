@@ -66,7 +66,9 @@ export default function HistoryView({ bridge }: { bridge?: Window['voicepilot'] 
             <div style={styles.actions}>
               <button
                 style={styles.primary}
-                onClick={() => void vp.copy(selected.polished ?? selected.text)}
+                onClick={() => {
+                  void vp.copy(selected.polished ?? selected.text).then((ok) => setCopied(ok));
+                }}
               >
                 复制
               </button>
