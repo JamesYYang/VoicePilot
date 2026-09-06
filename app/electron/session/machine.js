@@ -112,6 +112,7 @@ export class SessionMachine {
     this.#attempt = 0;
     this.#truncated = false;
     this.#notice = null;
+    this.#lastDurationMs = null;
     this.#queue.clear();
     this.#lastSeqSent = 0;
     this.#setState('warming');

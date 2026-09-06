@@ -21,6 +21,7 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const reload = () => {
     void vp.listPresets(kind).then(setPresets);
@@ -32,26 +33,42 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
     setEditingId(p.id);
     setName(p.name);
     setDesc(p.description);
+    setError(null);
   };
 
   const reset = () => {
     setEditingId(null);
     setName('');
     setDesc('');
+    setError(null);
   };
 
   const save = async () => {
     if (!name.trim()) return;
-    await vp.savePreset({ id: editingId ?? undefined, kind, name: name.trim(), description: desc.trim() });
-    reset();
-    reload();
-    onChanged();
+    if (presets.some((p) => p.name === name.trim() && p.id !== editingId)) {
+      setError('名称已存在');
+      return;
+    }
+    try {
+      await vp.savePreset({ id: editingId ?? undefined, kind, name: name.trim(), description: desc.trim() });
+      setError(null);
+      reset();
+      reload();
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const del = async (id: number) => {
-    await vp.deletePreset(id);
-    reload();
-    onChanged();
+    try {
+      await vp.deletePreset(id);
+      setError(null);
+      reload();
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -95,6 +112,7 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
           </button>
           {editingId != null && <button style={styles.link} onClick={reset}>取消编辑</button>}
         </div>
+        {error && <div style={styles.error}>{error}</div>}
       </div>
     </div>
   );
@@ -114,4 +132,5 @@ const styles = {
   form: { display: 'flex', gap: 6, alignItems: 'center' },
   input: { flex: 1, minWidth: 0, padding: '5px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 12, outline: 'none' },
   primary: { padding: '5px 12px', borderRadius: 6, border: '1px solid #1d4ed8', background: '#1d4ed8', color: '#ffffff', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
+  error: { color: '#dc2626', fontSize: 12 },
 } satisfies Record<string, CSSProperties>;

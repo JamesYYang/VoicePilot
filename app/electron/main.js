@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { createStudioWindow } from './studio.js';
 import { createOnboardingWindow } from './onboarding.js';
-import { openStore, getMeta } from './store.js';
+import { getMeta } from './store.js';
 
 /**
  * VoicePilot 主进程 —— 应用外壳。

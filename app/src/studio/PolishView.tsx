@@ -181,6 +181,8 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
             void vp.syncStudio().then((s: StudioSync) => {
               setScenes(s.scenes);
               setTones(s.tones);
+              setScene((prev) => s.scenes.find((p) => p.name === prev?.name) ?? s.scenes[0] ?? null);
+              setTone((prev) => s.tones.find((p) => p.name === prev?.name) ?? s.tones[0] ?? null);
             });
           }}
         />

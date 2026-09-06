@@ -15,8 +15,11 @@ export default function Onboarding({ bridge }: { bridge?: Window['voicepilot'] }
   const vp = bridge ?? window.voicepilot;
 
   const choose = async (profession: string) => {
-    await vp.saveOnboarding({ profession });
-    await vp.closeOnboarding();
+    try {
+      await vp.saveOnboarding({ profession });
+    } finally {
+      await vp.closeOnboarding();
+    }
   };
 
   return (
