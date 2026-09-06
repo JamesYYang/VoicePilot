@@ -22,6 +22,7 @@ export function createOnboardingWindow({ attachDevLogging }) {
     resizable: false,
     title: '欢迎使用 VoicePilot 闻字',
     backgroundColor: '#ffffff',
+    icon: join(HERE, '..', 'build', 'voicepilot-icon-256.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(HERE, 'preload.cjs'),

@@ -224,6 +224,7 @@ function createDiagWindow() {
     width: 920,
     height: 780,
     title: 'VoicePilot 采集诊断',
+    icon: join(HERE, '..', 'build', 'voicepilot-icon-256.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(HERE, 'preload.cjs'),
