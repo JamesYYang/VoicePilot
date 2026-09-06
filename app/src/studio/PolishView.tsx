@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
+import PresetManager from './PresetManager';
 
 /**
  * 润色工作区（Task 4/5）。
@@ -15,18 +16,20 @@ import type { CSSProperties } from 'react';
 
 interface StudioSync {
   text: string;
-  scenes: string[];
-  tones: string[];
+  scenes: Preset[];
+  tones: Preset[];
+  defaultScene: string | null;
 }
 
 export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
   const vp = bridge ?? window.voicepilot;
 
   const [text, setText] = useState('');
-  const [scenes, setScenes] = useState<string[]>([]);
-  const [tones, setTones] = useState<string[]>([]);
-  const [scene, setScene] = useState('');
-  const [tone, setTone] = useState('');
+  const [scenes, setScenes] = useState<Preset[]>([]);
+  const [tones, setTones] = useState<Preset[]>([]);
+  const [scene, setScene] = useState<Preset | null>(null);
+  const [tone, setTone] = useState<Preset | null>(null);
+  const [managerKind, setManagerKind] = useState<'scene' | 'tone' | null>(null);
   const [copied, setCopied] = useState(false);
   const [output, setOutput] = useState('');
   const [polishing, setPolishing] = useState(false);
@@ -37,8 +40,8 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
       setText(s.text);
       setScenes(s.scenes);
       setTones(s.tones);
-      setScene(s.scenes[0] ?? '');
-      setTone(s.tones[0] ?? '');
+      setScene(s.scenes.find((p) => p.name === s.defaultScene) ?? s.scenes[0] ?? null);
+      setTone(s.tones[0] ?? null);
     });
   }, [vp]);
 
@@ -81,15 +84,14 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           <select
             data-testid="polish-scene"
             style={styles.select}
-            value={scene}
-            onChange={(e) => setScene(e.target.value)}
+            value={scene?.name ?? ''}
+            onChange={(e) => setScene(scenes.find((p) => p.name === e.target.value) ?? null)}
           >
-            {scenes.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
+            {scenes.map((p) => (
+              <option key={p.id} value={p.name}>{p.name}</option>
             ))}
           </select>
+          <button data-testid="manage-scene" style={styles.manage} onClick={() => setManagerKind('scene')}>管理</button>
         </label>
 
         <label style={styles.field}>
@@ -97,15 +99,14 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           <select
             data-testid="polish-tone"
             style={styles.select}
-            value={tone}
-            onChange={(e) => setTone(e.target.value)}
+            value={tone?.name ?? ''}
+            onChange={(e) => setTone(tones.find((p) => p.name === e.target.value) ?? null)}
           >
-            {tones.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
+            {tones.map((p) => (
+              <option key={p.id} value={p.name}>{p.name}</option>
             ))}
           </select>
+          <button data-testid="manage-tone" style={styles.manage} onClick={() => setManagerKind('tone')}>管理</button>
         </label>
 
         <button
@@ -145,6 +146,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           onClick={() => {
             setText(output);
             setOutput('');
+            void vp.adoptPolish({ polished: output, scene: scene?.name ?? '', tone: tone?.name ?? '' });
           }}
           disabled={output.length === 0}
         >
@@ -168,6 +170,20 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
         {copied && <span style={styles.hint}>已复制到剪贴板</span>}
         {polishError && <span style={styles.error}>润色失败：{polishError}</span>}
       </div>
+
+      {managerKind && (
+        <PresetManager
+          kind={managerKind}
+          bridge={bridge}
+          onClose={() => setManagerKind(null)}
+          onChanged={() => {
+            void vp.syncStudio().then((s: StudioSync) => {
+              setScenes(s.scenes);
+              setTones(s.tones);
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -208,6 +224,15 @@ const styles = {
     color: '#111827',
     fontSize: 12,
     outline: 'none',
+  },
+  manage: {
+    padding: '4px 8px',
+    borderRadius: 6,
+    border: '1px solid #d1d5db',
+    background: '#ffffff',
+    color: '#111827',
+    fontSize: 12,
+    cursor: 'pointer',
   },
   run: {
     marginLeft: 'auto',

@@ -87,7 +87,7 @@ interface VoicePilotBridge {
   /** 关闭主应用窗口 */
   closeStudio(): Promise<boolean>;
   /** 发起润色。流式结果经 onPolishDelta/onPolishDone/onPolishError 回传 */
-  startPolish(payload: { text: string; scene: string; tone: string }): Promise<boolean>;
+  startPolish(payload: { text: string; scene: Preset; tone: Preset }): Promise<boolean>;
   /** 预设列表（kind = scene | tone） */
   listPresets(kind: 'scene' | 'tone'): Promise<Preset[]>;
   /** 新建/编辑预设（有 id 更新、无 id 新建） */
