@@ -355,8 +355,12 @@ app.whenReady().then(async () => {
   createTray();
   registerShortcuts(machine);
 
-  // 首次启动弹引导窗（PRD §4.0）。查 meta 里的 first_run_done 标志。
-  if (getMeta('first_run_done') !== 'true') {
+  // 首次启动引导窗（F8）—— 暂缓启用（2026-09-06）。
+  // 原因：引导的职业选择当前只影响润色默认场景，原设计「职业 → 两组提示词」
+  // （ASR 提示词 + 润色提示词）尚未实现，弹出来问的问题基本没实际效果，先隐藏。
+  // 代码全部保留（onboarding.js / Onboarding.tsx / vp:onboarding/* IPC 未删），
+  // 想临时开出来测试：VP_ENABLE_ONBOARDING=1 npm start。
+  if (process.env.VP_ENABLE_ONBOARDING === '1' && getMeta('first_run_done') !== 'true') {
     createOnboardingWindow({ attachDevLogging });
   }
 
