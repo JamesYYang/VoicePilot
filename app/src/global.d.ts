@@ -10,6 +10,8 @@ interface VoicePilotBridge {
   saveWav(bytes: Uint8Array): Promise<string>;
   /** 在文件管理器中定位文件 */
   revealPath(path: string): void;
+  /** 退出应用（托盘图标目前是空图，点不到菜单里的退出） */
+  quit(): void;
 }
 
 interface Window {

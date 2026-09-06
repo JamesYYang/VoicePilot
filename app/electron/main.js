@@ -39,6 +39,25 @@ let bar = null;
 let diag = null;
 let rendererReady = false;
 
+/**
+ * 是否正在走退出流程。
+ *
+ * 这个标志是必需的，因为 app.quit() 的语义是「先尝试关闭所有窗口，全都关掉了
+ * 才真的退出」。而下面两处为了「常驻托盘」会无条件拦住关闭：
+ *   - 悬浮条的 close：preventDefault 后 hide（点叉只是隐藏，不该退出）
+ *   - window-all-closed：防止关掉最后一个窗口就退出
+ * 于是不管是托盘菜单的「退出」还是界面上的退出按钮，调 app.quit() 都会被自己
+ * 拦下来，表现是「点了退出，应用还活着」。
+ *
+ * 所以退出必须显式发起：置上这个标志，让上面两处放行。
+ */
+let isQuitting = false;
+
+function requestQuit() {
+  isQuitting = true;
+  app.quit();
+}
+
 // 渲染进程还没加载完时按了快捷键，先记下来，加载完再补发。
 let pendingToggle = false;
 
@@ -160,6 +179,7 @@ function createBar() {
   bar.setIgnoreMouseEvents(true, { forward: true });
 
   bar.on('close', (e) => {
+    if (isQuitting) return; // 真要退出时放行，否则 app.quit() 会被这里拦死
     e.preventDefault();
     bar.hide(); // 常驻，关闭只隐藏
   });
@@ -243,7 +263,7 @@ function createTray() {
       { type: 'separator' },
       { label: '采集诊断（M1）', click: () => createDiagWindow() },
       { type: 'separator' },
-      { label: '退出', click: () => app.quit() },
+      { label: '退出', click: () => requestQuit() },
     ])
   );
 }
@@ -296,6 +316,8 @@ ipcMain.on('vp:reveal-path', (_e, path) => {
   shell.showItemInFolder(path);
 });
 
+ipcMain.on('vp:quit', () => requestQuit());
+
 // ---------------------------------------------------------------- 生命周期
 
 app.whenReady().then(() => {
@@ -316,5 +338,10 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
 
-// 常驻托盘，所以关掉悬浮条不能导致退出
-app.on('window-all-closed', (e) => e.preventDefault());
+// 常驻托盘，所以关掉悬浮条不能导致退出。
+// 但主动退出时要放行：订阅了这个事件就等于接管了「是否退出」的决定，
+// 无条件 preventDefault 会让 app.quit() 永远退不掉。
+app.on('window-all-closed', (e) => {
+  if (isQuitting) return;
+  e.preventDefault();
+});

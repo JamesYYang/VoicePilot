@@ -121,9 +121,15 @@ export default function DiagPanel() {
 
   return (
     <div style={styles.page}>
-      <h1 style={styles.h1}>
-        采集诊断 <span style={styles.sub}>M1 spike · PRD §5.2 第 6 条</span>
-      </h1>
+      <div style={styles.header}>
+        <h1 style={styles.h1}>
+          采集诊断 <span style={styles.sub}>M1 spike · PRD §5.2 第 6 条</span>
+        </h1>
+        {/* 托盘图标是空图，点不到菜单里的「退出」，这里是唯一的退出口子 */}
+        <button style={styles.button(false)} onClick={() => window.voicepilot.quit()}>
+          退出应用
+        </button>
+      </div>
 
       <div style={styles.bar}>
         <button style={styles.button(running)} onClick={running ? stopAndSave : start}>
@@ -322,6 +328,12 @@ const styles = {
     padding: '28px 32px 60px',
     fontSize: 13,
     lineHeight: 1.7,
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
   },
   h1: { fontSize: 18, fontWeight: 600, margin: '0 0 4px', color: '#f3f4f6' },
   sub: { fontSize: 12, fontWeight: 400, color: '#6b7280' },
