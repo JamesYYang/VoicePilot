@@ -226,4 +226,14 @@ contextBridge.exposeInMainWorld('voicepilot', {
   onStudioRefresh(cb) {
     return subscribe('vp:studio/refresh', cb);
   },
+
+  /** 记录首次引导选择。 */
+  saveOnboarding(payload) {
+    return ipcRenderer.invoke('vp:onboarding/save', payload);
+  },
+
+  /** 关闭首次引导窗口。 */
+  closeOnboarding() {
+    return ipcRenderer.invoke('vp:onboarding/close');
+  },
 });

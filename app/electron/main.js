@@ -13,6 +13,8 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { createStudioWindow } from './studio.js';
+import { createOnboardingWindow } from './onboarding.js';
+import { openStore, getMeta } from './store.js';
 
 /**
  * VoicePilot 主进程 —— 应用外壳。
@@ -351,6 +353,11 @@ app.whenReady().then(async () => {
   createBar();
   createTray();
   registerShortcuts(machine);
+
+  // 首次启动弹引导窗（PRD §4.0）。查 meta 里的 first_run_done 标志。
+  if (getMeta('first_run_done') !== 'true') {
+    createOnboardingWindow({ attachDevLogging });
+  }
 
   // M1 阶段要反复跑采集诊断，而托盘图标还是空图（createTray 里的 TODO），
   // 小到几乎点不中。开发时用 VP_OPEN_DIAG=1 直接把诊断窗口开出来。

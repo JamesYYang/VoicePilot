@@ -36,6 +36,12 @@ async function boot() {
     return;
   }
 
+  if (route === 'onboarding') {
+    const { default: Onboarding } = await import('./onboarding/Onboarding');
+    createRoot(container).render(<Onboarding />);
+    return;
+  }
+
   createRoot(container).render(route === 'diag' ? <DiagPanel /> : <App />);
 }
 

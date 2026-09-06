@@ -3,7 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
 import { createStudioWindow, getStudioWindow } from './studio.js';
-import { listPresets, savePreset, deletePreset, getMeta, saveHistory, listHistory, getHistory, updateHistoryPolish } from './store.js';
+import { getOnboardingWindow } from './onboarding.js';
+import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish } from './store.js';
 import { streamPolish } from './llm/polish.js';
 
 /**
@@ -212,6 +213,20 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
     if (pendingHistoryId != null) {
       updateHistoryPolish(pendingHistoryId, { polished, scene, tone });
     }
+    return true;
+  });
+
+  /** 记录首次引导选择：职业 + 场景默认值 + 首次标志。 */
+  ipcMain.handle('vp:onboarding/save', (_e, { profession }) => {
+    setMeta('profession', profession);
+    setMeta('default_scene', profession === 'product_rd' ? '文档' : '邮件');
+    setMeta('first_run_done', 'true');
+    return true;
+  });
+
+  /** 关闭引导窗。 */
+  ipcMain.handle('vp:onboarding/close', () => {
+    getOnboardingWindow()?.close();
     return true;
   });
 
