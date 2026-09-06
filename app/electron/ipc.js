@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
 import { createStudioWindow, getStudioWindow } from './studio.js';
-import { listPresets, savePreset, deletePreset, getMeta } from './store.js';
+import { listPresets, savePreset, deletePreset, getMeta, saveHistory, listHistory, getHistory, updateHistoryPolish } from './store.js';
 import { streamPolish } from './llm/polish.js';
 
 /**
@@ -18,6 +18,7 @@ import { streamPolish } from './llm/polish.js';
  * 主应用挂载时经 vp:studio/sync 拉走。
  */
 let pendingStudioText = '';
+let pendingHistoryId = null;
 
 export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
   /**
@@ -130,8 +131,9 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
   // ---------------------------------------------------------------- 主应用（Studio）
 
   /** 打开主应用，把悬浮条刚转出来的文本带过去。 */
-  ipcMain.handle('vp:studio/open', (_e, text) => {
+  ipcMain.handle('vp:studio/open', (_e, { text, historyId }) => {
     pendingStudioText = String(text ?? '');
+    pendingHistoryId = historyId != null ? Number(historyId) : null;
     createStudioWindow({ attachDevLogging });
     // 窗口已存在时只 focus 不重载，所以这里主动推一次刷新事件，
     // 让已挂载的编辑器用新文本覆盖旧内容（重复口述→再点润色的场景）。
@@ -186,6 +188,29 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
       });
     } catch (e) {
       emit('vp:polish/error', { message: e?.message ?? String(e) });
+    }
+    return true;
+  });
+
+  /** 历史写入。原文由渲染进程在 reviewing 时上报一次。返回新条目 id。 */
+  ipcMain.handle('vp:history/save', (_e, { text }) => {
+    const t = String(text ?? '');
+    if (!t.trim()) return { id: null };
+    const { id } = saveHistory({ text: t, durationMs: machine.lastDurationMs });
+    console.log(`[历史] 已保存 #${id}（${t.length} 字，时长 ${machine.lastDurationMs ?? '?'}ms）`);
+    return { id };
+  });
+
+  /** 历史列表（倒序）。 */
+  ipcMain.handle('vp:history/list', () => listHistory({ limit: 200 }));
+
+  /** 历史详情。 */
+  ipcMain.handle('vp:history/get', (_e, id) => getHistory(Number(id)));
+
+  /** 采用润色结果：把润色文本 + 场景/语气回写进本次会话的历史条目。 */
+  ipcMain.handle('vp:polish/adopt', (_e, { polished, scene, tone }) => {
+    if (pendingHistoryId != null) {
+      updateHistoryPolish(pendingHistoryId, { polished, scene, tone });
     }
     return true;
   });

@@ -13,6 +13,16 @@ interface SessionSnapshot {
   truncated: boolean;
 }
 
+interface HistoryRow {
+  id: number;
+  text: string;
+  polished: string | null;
+  scene: string | null;
+  tone: string | null;
+  duration_ms: number | null;
+  created_at: number;
+}
+
 interface AsrPartial {
   recvAtMs: number;
   text: string;
@@ -63,7 +73,15 @@ interface VoicePilotBridge {
 
   // —— 主应用（Studio）——
   /** 打开主应用并带入待润色文本 */
-  openStudio(text: string): Promise<boolean>;
+  openStudio(payload: { text: string; historyId?: number }): Promise<boolean>;
+  /** 保存一段历史（原文）。返回 {id} */
+  historySave(payload: { text: string }): Promise<{ id: number | null }>;
+  /** 历史列表（倒序） */
+  historyList(): Promise<HistoryRow[]>;
+  /** 历史详情 */
+  historyGet(id: number): Promise<HistoryRow | null>;
+  /** 采用润色结果，回写历史 */
+  adoptPolish(payload: { polished: string; scene: string; tone: string }): Promise<boolean>;
   /** 主应用挂载时拉 {text, scenes, tones, defaultScene} */
   syncStudio(): Promise<{ text: string; scenes: Preset[]; tones: Preset[]; defaultScene: string | null }>;
   /** 关闭主应用窗口 */

@@ -180,6 +180,10 @@ export class LatencyMetrics {
         this.#stopAt !== null && this.#reviewingAt !== null
           ? this.#reviewingAt - this.#stopAt
           : null, // 目标 <1500
+      dictationDurationMs:
+        this.#toggleAt !== null && this.#stopAt !== null
+          ? this.#stopAt - this.#toggleAt
+          : null, // 会话时长（快捷键按下 → 松开），供历史落库
     };
   }
 

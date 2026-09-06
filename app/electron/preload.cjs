@@ -153,8 +153,8 @@ contextBridge.exposeInMainWorld('voicepilot', {
   // ---------------------------------------------------------------- 主应用（Studio）
 
   /** 打开主应用并带入待润色文本。 */
-  openStudio(text) {
-    return ipcRenderer.invoke('vp:studio/open', text);
+  openStudio(payload) {
+    return ipcRenderer.invoke('vp:studio/open', payload);
   },
 
   /** 主应用挂载时拉 {text, scenes, tones, defaultScene}。 */
@@ -180,6 +180,26 @@ contextBridge.exposeInMainWorld('voicepilot', {
   /** 关闭主应用窗口。 */
   closeStudio() {
     return ipcRenderer.invoke('vp:studio/close');
+  },
+
+  /** 保存一段历史（原文）。返回 {id}。 */
+  historySave(payload) {
+    return ipcRenderer.invoke('vp:history/save', payload);
+  },
+
+  /** 历史列表（倒序）。 */
+  historyList() {
+    return ipcRenderer.invoke('vp:history/list');
+  },
+
+  /** 历史详情。 */
+  historyGet(id) {
+    return ipcRenderer.invoke('vp:history/get', id);
+  },
+
+  /** 采用润色结果，回写历史。 */
+  adoptPolish(payload) {
+    return ipcRenderer.invoke('vp:polish/adopt', payload);
   },
 
   /** 发起润色。流式结果经 onPolishDelta/onPolishDone/onPolishError 回传。 */

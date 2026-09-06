@@ -42,6 +42,7 @@ export class SessionMachine {
   #drainTimer = null;
   #retryTimer = null;
   #lastSeqSent = 0;
+  #lastDurationMs = null;
   #backoffMs = BACKOFF_MS;
   #createSession;
   #fixedCreds = null;
@@ -71,6 +72,11 @@ export class SessionMachine {
 
   get state() {
     return this.#state;
+  }
+
+  /** 最近一次会话的时长（毫秒），无结果时为 null。供 vp:history/save 落库。 */
+  get lastDurationMs() {
+    return this.#lastDurationMs;
   }
 
   /** 渲染进程挂载时拉一次当前状态，避免错过它启动之前的那次状态广播。 */
@@ -203,6 +209,8 @@ export class SessionMachine {
 
     const summary = this.#metrics?.finish();
     if (!summary) return;
+
+    this.#lastDurationMs = summary.dictationDurationMs ?? null;
 
     console.log(`[延迟] ${formatSummary(summary)}`);
     this.#emit('vp:metrics', summary);
