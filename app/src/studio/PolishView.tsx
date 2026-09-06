@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react';
  * 润色工作区（Task 4/5）。
  *
  * 三块：顶部工具条（场景/语气下拉 + 「润色」按钮）、中间并排（左原文可编辑、
- * 右润色结果流式上屏）、底部（「复制」「关闭」）。挂载时 syncStudio() 把悬浮条
+ * 右润色结果流式上屏）、底部（「采用」「复制」「关闭」）。挂载时 syncStudio() 把悬浮条
  * 转出的文本与场景/语气选项拉进来；点「润色」把 {text, scene, tone} 交给主进程，
  * 结果经 onPolishDelta 逐块增量追加到输出区，onPolishDone 收尾、onPolishError
  * 显示错误（Task 5 接入真正的流式润色）。
@@ -140,6 +140,17 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
 
       <div style={styles.footer}>
         <button
+          data-testid="polish-adopt"
+          style={styles.adopt}
+          onClick={() => {
+            setText(output);
+            setOutput('');
+          }}
+          disabled={output.length === 0}
+        >
+          采用
+        </button>
+        <button
           data-testid="polish-copy"
           style={styles.copy}
           onClick={() => void copy()}
@@ -150,7 +161,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
         <button
           data-testid="polish-close"
           style={styles.ghost}
-          onClick={() => window.close()}
+          onClick={() => void vp.closeStudio()}
         >
           关闭
         </button>
@@ -262,6 +273,16 @@ const styles = {
     alignItems: 'center',
     gap: 8,
     flexShrink: 0,
+  },
+  adopt: {
+    padding: '5px 14px',
+    borderRadius: 6,
+    border: '1px solid #1d4ed8',
+    background: '#1d4ed8',
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
   },
   copy: {
     padding: '5px 14px',

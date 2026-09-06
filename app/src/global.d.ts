@@ -59,6 +59,8 @@ interface VoicePilotBridge {
   openStudio(text: string): Promise<boolean>;
   /** 主应用挂载时拉 {text, scenes, tones} */
   syncStudio(): Promise<{ text: string; scenes: string[]; tones: string[] }>;
+  /** 关闭主应用窗口 */
+  closeStudio(): Promise<boolean>;
   /** 发起润色。流式结果经 onPolishDelta/onPolishDone/onPolishError 回传 */
   startPolish(payload: { text: string; scene: string; tone: string }): Promise<boolean>;
   /** 润色流式增量，逐块推送 */

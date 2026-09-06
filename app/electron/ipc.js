@@ -149,6 +149,12 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
     tones: TONES,
   }));
 
+  /** 关闭主应用窗口。 */
+  ipcMain.handle('vp:studio/close', () => {
+    getStudioWindow()?.close();
+    return true;
+  });
+
   /**
    * 润色入口（Task 5）：调用 streamPolish 流式润色，delta 逐块推回渲染进程。
    * 结果走三个事件：vp:polish/delta（增量）/ done（收尾）/ error（失败）。

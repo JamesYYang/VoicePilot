@@ -311,6 +311,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
       {snap.state === 'reviewing' && (
         <div style={styles.actions}>
+          <button style={styles.button} onClick={() => void vp.openStudio(fullText)}>
+            润色
+          </button>
           <button style={styles.button} onClick={copy} disabled={fullText.length === 0}>
             复制
           </button>

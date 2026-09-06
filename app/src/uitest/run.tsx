@@ -388,6 +388,20 @@ export async function runUiTest() {
       false
   );
 
+  // ---- 11.5 采用：润色结果替换编辑区原文，并清空结果区（Task 6）----
+  studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-adopt"]')?.click();
+  await flush();
+  check(
+    '点「采用」把润色结果搬进编辑区原文',
+    studioContainer.querySelector('textarea')?.value === '润色后的第一句',
+    JSON.stringify(studioContainer.querySelector('textarea')?.value)
+  );
+  check(
+    '点「采用」后清空润色结果区',
+    studioContainer.querySelector('[data-testid="polish-output"]')?.textContent === '',
+    JSON.stringify(studioContainer.querySelector('[data-testid="polish-output"]')?.textContent)
+  );
+
   // ---- 12. 润色失败：error 事件 → 显示错误 + 按钮恢复（Task 5 修复，单路径 emit）----
   studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.click();
   await flush();

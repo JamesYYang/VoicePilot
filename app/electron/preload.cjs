@@ -162,6 +162,11 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:studio/sync');
   },
 
+  /** 关闭主应用窗口。 */
+  closeStudio() {
+    return ipcRenderer.invoke('vp:studio/close');
+  },
+
   /** 发起润色。流式结果经 onPolishDelta/onPolishDone/onPolishError 回传。 */
   startPolish(payload) {
     return ipcRenderer.invoke('vp:polish/start', payload);
