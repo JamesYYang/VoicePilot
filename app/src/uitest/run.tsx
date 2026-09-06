@@ -311,7 +311,7 @@ export async function runUiTest() {
       Promise.resolve({ text: '测试原文', scenes: ['邮件'], tones: ['正式'] }),
     startPolish: (p: { text: string; scene: string; tone: string }) => {
       polishCall.payload = p;
-      return Promise.resolve();
+      return Promise.resolve(true);
     },
     onPolishDelta: (cb: (p: { text: string }) => void) => {
       studioDelta.cb = cb;
@@ -384,6 +384,27 @@ export async function runUiTest() {
   await flush();
   check(
     '润色完成后按钮恢复可点',
+    studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.disabled ===
+      false
+  );
+
+  // ---- 12. 润色失败：error 事件 → 显示错误 + 按钮恢复（Task 5 修复，单路径 emit）----
+  studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.click();
+  await flush();
+  check(
+    '润色失败路径：发起后按钮禁用',
+    studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.disabled ===
+      true
+  );
+  studioError.cb?.({ message: '测试错误' });
+  await flush();
+  check(
+    '润色失败在输出区/错误区显示错误信息',
+    studioContainer.textContent?.includes('润色失败：测试错误') === true,
+    JSON.stringify(studioContainer.textContent)
+  );
+  check(
+    '润色失败后按钮恢复可点',
     studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.disabled ===
       false
   );

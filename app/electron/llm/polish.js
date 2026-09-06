@@ -34,7 +34,6 @@ export async function streamPolish({ text, scene, tone, onDelta, onDone, onError
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     const err = new Error(`润色请求失败 HTTP ${res.status} ${body.slice(0, 200)}`);
-    onError(err);
     throw err;
   }
 
