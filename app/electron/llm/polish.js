@@ -42,15 +42,12 @@ export async function streamPolish({ text, scene, tone, onDelta, onDone, onError
   const decoder = new TextDecoder();
   let buf = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-
+  // 切出完整行（含 `\n`），逐行解析 SSE；返回剩余的不完整片段。
+  const drain = (s) => {
     let idx;
-    while ((idx = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
+    while ((idx = s.indexOf('\n')) >= 0) {
+      const line = s.slice(0, idx).trim();
+      s = s.slice(idx + 1);
       if (!line.startsWith('data:')) continue;
       const data = line.slice(5).trim();
       if (data === '[DONE]') continue;
@@ -64,7 +61,19 @@ export async function streamPolish({ text, scene, tone, onDelta, onDone, onError
       const delta = j.choices?.[0]?.delta?.content ?? '';
       if (delta) onDelta(delta);
     }
+    return s;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    buf = drain(buf);
   }
+
+  // 流结束 flush：解码器内部可能仍残留未输出的字节；处理无 `\n` 的尾行。
+  buf += decoder.decode();
+  drain(buf);
 
   onDone();
 }
