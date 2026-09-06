@@ -8,9 +8,10 @@ import {
   nativeImage,
   ipcMain,
   protocol,
+  shell,
 } from 'electron';
 import { dirname, extname, join, resolve, sep } from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -35,6 +36,7 @@ const BAR = { width: 560, height: 148, margin: 24 };
 
 let tray = null;
 let bar = null;
+let diag = null;
 let rendererReady = false;
 
 // 渲染进程还没加载完时按了快捷键，先记下来，加载完再补发。
@@ -93,6 +95,23 @@ function registerAppProtocol() {
 
 // ---------------------------------------------------------------- 窗口
 
+/**
+ * 把渲染进程的 console 与加载失败转发到终端。
+ *
+ * 每个窗口都要挂。渲染进程里的报错不会出现在主进程 stdout，不挂就只剩
+ * 一片白屏毫无线索 —— M1 采集诊断的读数也是靠 console 打出来的，
+ * 漏挂一个窗口等于这次测量白跑。
+ */
+function attachDevLogging(win) {
+  if (app.isPackaged) return;
+  win.webContents.on('console-message', (_e, _level, message, _line, sourceId) => {
+    console.log(`[渲染] ${message}   ← ${sourceId}`);
+  });
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error(`[加载失败] code=${code} ${desc} ${url}`);
+  });
+}
+
 function createBar() {
   const { x, y, width, height } = screen.getPrimaryDisplay().workArea;
 
@@ -145,16 +164,7 @@ function createBar() {
     bar.hide(); // 常驻，关闭只隐藏
   });
 
-  if (!app.isPackaged) {
-    // 渲染进程里的错误不会出现在主进程 stdout，白屏时完全没有线索。
-    // 开发模式把渲染进程的 console 与加载失败转发到终端。
-    bar.webContents.on('console-message', (_e, _level, message, _line, sourceId) => {
-      console.log(`[渲染] ${message}   ← ${sourceId}`);
-    });
-    bar.webContents.on('did-fail-load', (_e, code, desc, url) => {
-      console.error(`[加载失败] code=${code} ${desc} ${url}`);
-    });
-  }
+  attachDevLogging(bar);
 
   bar.webContents.once('did-finish-load', () => {
     rendererReady = true;
@@ -177,6 +187,48 @@ function loadRenderer(win) {
   else win.loadURL('app://voicepilot/index.html');
 }
 
+// ---------------------------------------------------------------- 采集诊断窗口
+
+/**
+ * M1 采集 spike 的诊断窗口（PRD §5.2 第 6 条）。
+ *
+ * 必须是独立窗口，不能复用悬浮条：悬浮条 focusable:false 且默认鼠标穿透，
+ * 里面的按钮根本点不到，而诊断面板需要点「开始采集」。
+ *
+ * 这是开发工具，不在 PRD 的交付范围内 —— 但它同时是 F13 诊断导出的雏形，
+ * 所以保留在主应用里，而不是另起一个 spike 工程。
+ */
+function createDiagWindow() {
+  if (diag && !diag.isDestroyed()) {
+    diag.focus();
+    return;
+  }
+
+  diag = new BrowserWindow({
+    width: 920,
+    height: 780,
+    title: 'VoicePilot 采集诊断',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: join(HERE, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      // 采集过程中窗口被切到后台，也要继续收音频：后台节流会直接毁掉测量
+      backgroundThrottling: false,
+    },
+  });
+
+  // VP_OPEN_DIAG 给纯数字时当作自动采集时长（毫秒），跑完自动停并导出。
+  const autorun = Number(process.env.VP_OPEN_DIAG);
+  const hash =
+    Number.isFinite(autorun) && autorun > 1 ? `#diag?autorun=${autorun}` : '#diag';
+  attachDevLogging(diag);
+  diag.loadURL(`app://voicepilot/index.html${hash}`);
+  diag.on('closed', () => {
+    diag = null;
+  });
+}
+
 // ---------------------------------------------------------------- 托盘与快捷键
 
 function createTray() {
@@ -188,6 +240,8 @@ function createTray() {
     Menu.buildFromTemplate([
       { label: '显示悬浮条', click: () => bar?.show() },
       { label: '隐藏悬浮条', click: () => bar?.hide() },
+      { type: 'separator' },
+      { label: '采集诊断（M1）', click: () => createDiagWindow() },
       { type: 'separator' },
       { label: '退出', click: () => app.quit() },
     ])
@@ -223,6 +277,25 @@ ipcMain.on('vp:mouse-passthrough', (_e, passthrough) => {
   bar?.setIgnoreMouseEvents(Boolean(passthrough), { forward: true });
 });
 
+/**
+ * 把采集的 WAV 写到 userData/captures 下。
+ * 不走保存对话框：spike 阶段要反复导出，每次选路径纯属折磨。
+ */
+ipcMain.handle('vp:save-wav', async (_e, bytes) => {
+  const dir = join(app.getPath('userData'), 'captures');
+  await mkdir(dir, { recursive: true });
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = join(dir, `capture-${stamp}.wav`);
+  await writeFile(file, Buffer.from(bytes));
+  console.log(`[采集] 已导出 ${file}（${(bytes.length / 1024 / 1024).toFixed(2)} MB）`);
+  return file;
+});
+
+ipcMain.on('vp:reveal-path', (_e, path) => {
+  shell.showItemInFolder(path);
+});
+
 // ---------------------------------------------------------------- 生命周期
 
 app.whenReady().then(() => {
@@ -230,6 +303,12 @@ app.whenReady().then(() => {
   createBar();
   createTray();
   registerShortcuts();
+
+  // M1 阶段要反复跑采集诊断，而托盘图标还是空图（createTray 里的 TODO），
+  // 小到几乎点不中。开发时用 VP_OPEN_DIAG=1 直接把诊断窗口开出来。
+  // 给毫秒数则自动跑一轮：VP_OPEN_DIAG=180000 采集 3 分钟后自动停止并导出。
+  if (process.env.VP_OPEN_DIAG) createDiagWindow();
+
   console.log('[VoicePilot] 已启动，托盘常驻');
 });
 

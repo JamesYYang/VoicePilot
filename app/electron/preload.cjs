@@ -42,6 +42,21 @@ contextBridge.exposeInMainWorld('voicepilot', {
   },
 
   /**
+   * 把采集到的音频落盘为 WAV，返回绝对路径。
+   *
+   * 必须由主进程代写：渲染进程拿不到 node:fs，也没有权限决定往哪写。
+   * 落盘的是 16kHz/16bit/单声道，可直接喂给 `npm run probe -- --audio <路径>`。
+   */
+  saveWav(bytes) {
+    return ipcRenderer.invoke('vp:save-wav', bytes);
+  },
+
+  /** 在文件管理器中定位已导出的文件，省得手工找 userData 目录。 */
+  revealPath(path) {
+    ipcRenderer.send('vp:reveal-path', path);
+  },
+
+  /**
    * 切换鼠标穿透。
    *
    * 悬浮条默认穿透（否则会挡住用户正在操作的应用），鼠标移入时要临时

@@ -2,6 +2,11 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      CSP 保持收紧：script-src 只允许自身源，不放行 blob:。
+      重采样 worklet 是从 public/ 按同源脚本加载的真实文件（见 src/audio/capture.ts），
+      所以无需为它开口子 —— 早先用 Blob URL 时不得不开，实测那样会被这里直接拦掉。
+    -->
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
     <title>VoicePilot</title>

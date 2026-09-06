@@ -6,6 +6,10 @@ interface VoicePilotBridge {
   onToggle(callback: () => void): () => void;
   /** 切换鼠标穿透：悬浮条默认穿透，鼠标移入时要临时关闭才能点按钮 */
   setMousePassthrough(passthrough: boolean): void;
+  /** 把 WAV 字节落盘，返回绝对路径（M1 采集诊断用） */
+  saveWav(bytes: Uint8Array): Promise<string>;
+  /** 在文件管理器中定位文件 */
+  revealPath(path: string): void;
 }
 
 interface Window {
