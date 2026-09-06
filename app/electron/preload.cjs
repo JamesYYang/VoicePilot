@@ -157,9 +157,24 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:studio/open', text);
   },
 
-  /** 主应用挂载时拉 {text, scenes, tones}。 */
+  /** 主应用挂载时拉 {text, scenes, tones, defaultScene}。 */
   syncStudio() {
     return ipcRenderer.invoke('vp:studio/sync');
+  },
+
+  /** 预设列表（kind = scene | tone）。 */
+  listPresets(kind) {
+    return ipcRenderer.invoke('vp:preset/list', kind);
+  },
+
+  /** 新建/编辑预设。 */
+  savePreset(payload) {
+    return ipcRenderer.invoke('vp:preset/save', payload);
+  },
+
+  /** 删除预设（内置不可删，返回 false）。 */
+  deletePreset(id) {
+    return ipcRenderer.invoke('vp:preset/delete', id);
   },
 
   /** 关闭主应用窗口。 */

@@ -1,5 +1,12 @@
 /** preload 暴露到 window.voicepilot 的接口。与 electron/preload.cjs 保持一致。 */
 
+interface Preset {
+  id: number;
+  name: string;
+  description: string;
+  is_builtin: number;
+}
+
 interface SessionSnapshot {
   state: 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing';
   notice: { kind: string; message: string; attempt: number; maxAttempts: number } | null;
@@ -57,12 +64,18 @@ interface VoicePilotBridge {
   // —— 主应用（Studio）——
   /** 打开主应用并带入待润色文本 */
   openStudio(text: string): Promise<boolean>;
-  /** 主应用挂载时拉 {text, scenes, tones} */
-  syncStudio(): Promise<{ text: string; scenes: string[]; tones: string[] }>;
+  /** 主应用挂载时拉 {text, scenes, tones, defaultScene} */
+  syncStudio(): Promise<{ text: string; scenes: Preset[]; tones: Preset[]; defaultScene: string | null }>;
   /** 关闭主应用窗口 */
   closeStudio(): Promise<boolean>;
   /** 发起润色。流式结果经 onPolishDelta/onPolishDone/onPolishError 回传 */
   startPolish(payload: { text: string; scene: string; tone: string }): Promise<boolean>;
+  /** 预设列表（kind = scene | tone） */
+  listPresets(kind: 'scene' | 'tone'): Promise<Preset[]>;
+  /** 新建/编辑预设（有 id 更新、无 id 新建） */
+  savePreset(payload: { id?: number; kind: 'scene' | 'tone'; name: string; description: string }): Promise<{ id: number }>;
+  /** 删除预设（内置不可删，返回 false） */
+  deletePreset(id: number): Promise<boolean>;
   /** 润色流式增量，逐块推送 */
   onPolishDelta(cb: (p: { text: string }) => void): () => void;
   /** 润色流结束 */

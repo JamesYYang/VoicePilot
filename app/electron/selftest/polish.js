@@ -9,8 +9,8 @@ export async function runPolishSelftest() {
   try {
     await streamPolish({
       text: '那个功能我们下周上线，你先看看有没有问题。',
-      scene: '邮件',
-      tone: '正式',
+      scene: { name: '邮件', description: '' },
+      tone: { name: '正式', description: '' },
       onDelta: (d) => { full += d; chunks += 1; },
       onDone: () => {},
       onError: (e) => { err = e; },

@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
 import { createStudioWindow, getStudioWindow } from './studio.js';
-import { SCENES, TONES } from './llm/prompt.js';
+import { listPresets, savePreset, deletePreset, getMeta } from './store.js';
 import { streamPolish } from './llm/polish.js';
 
 /**
@@ -142,11 +142,12 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
     return true;
   });
 
-  /** 主应用挂载时拉一次：待润色文本 + 场景/语气选项。 */
+  /** 主应用挂载时拉一次：待润色文本 + 场景/语气预设（来自 DB）。 */
   ipcMain.handle('vp:studio/sync', () => ({
     text: pendingStudioText,
-    scenes: SCENES,
-    tones: TONES,
+    scenes: listPresets('scene'),
+    tones: listPresets('tone'),
+    defaultScene: getMeta('default_scene'),
   }));
 
   /** 关闭主应用窗口。 */
@@ -154,6 +155,19 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
     getStudioWindow()?.close();
     return true;
   });
+
+  /** 预设列表。 */
+  ipcMain.handle('vp:preset/list', (_e, kind) => listPresets(kind));
+
+  /** 新建/编辑预设（有 id 更新、无 id 新建）。 */
+  ipcMain.handle('vp:preset/save', (_e, { id, kind, name, description }) => {
+    const r = savePreset({ id: id ?? null, kind, name, description });
+    // 返回后由渲染进程自己刷新列表
+    return r;
+  });
+
+  /** 删除预设。内置返回 false。 */
+  ipcMain.handle('vp:preset/delete', (_e, id) => deletePreset(Number(id)));
 
   /**
    * 润色入口（Task 5）：调用 streamPolish 流式润色，delta 逐块推回渲染进程。
