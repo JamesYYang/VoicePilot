@@ -30,6 +30,12 @@ async function boot() {
     return;
   }
 
+  if (route === 'studio') {
+    const { default: Studio } = await import('./studio/Studio');
+    createRoot(container).render(<Studio />);
+    return;
+  }
+
   createRoot(container).render(route === 'diag' ? <DiagPanel /> : <App />);
 }
 

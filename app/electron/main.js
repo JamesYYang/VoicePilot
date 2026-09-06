@@ -12,6 +12,7 @@ import { dirname, extname, join, resolve, sep } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
+import { createStudioWindow } from './studio.js';
 
 /**
  * VoicePilot 主进程 —— 应用外壳。
@@ -272,6 +273,8 @@ function createTray() {
   tray.setToolTip('VoicePilot 闻字');
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      { label: '打开主应用', click: () => createStudioWindow({ attachDevLogging }) },
+      { type: 'separator' },
       // 必须用 showInactive()：show() 会激活窗口，抢走目标应用的焦点，
       // 直接违反 A2「全过程不抢焦点」。
       { label: '显示悬浮条', click: () => bar?.showInactive() },
