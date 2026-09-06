@@ -320,7 +320,9 @@ app.whenReady().then(async () => {
     ? './selftest/asr.js'
     : process.env.VP_SM_SELFTEST
       ? './selftest/machine.js'
-      : null;
+      : process.env.VP_POLISH_SELFTEST
+        ? './selftest/polish.js'
+        : null;
 
   // 界面自测需要一个隐藏窗口来渲染，结果由 vp:uitest-result 回报（见 ipc.js）
   if (process.env.VP_UI_SELFTEST) {
@@ -330,7 +332,7 @@ app.whenReady().then(async () => {
 
   if (selftest) {
     const mod = await import(selftest);
-    const run = mod.runAsrSelftest ?? mod.runMachineSelftest;
+    const run = mod.runAsrSelftest ?? mod.runMachineSelftest ?? mod.runPolishSelftest;
     try {
       const r = await run();
       requestQuit(r.ok ? 0 : 1);
