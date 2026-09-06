@@ -55,15 +55,24 @@ export default function DiagPanel() {
   const [savedPath, setSavedPath] = useState('');
   const engineRef = useRef<CaptureEngine | null>(null);
   const latestRef = useRef<CaptureMetrics | null>(null);
+  /** 攒下的音频批次，仅用于导出 WAV。诊断工具专用，主链路不这么做。 */
+  const chunksRef = useRef<Int16Array[]>([]);
 
   // 引擎每 200ms 回推一次读数，直接进 state 触发重渲染即可：
   // 10fps 的更新频率对 React 毫无压力，不需要额外做节流。
   useEffect(() => {
     if (engineRef.current) return;
-    engineRef.current = new CaptureEngine((m) => {
-      latestRef.current = m;
-      setMetrics(m);
-    });
+    engineRef.current = new CaptureEngine(
+      (m) => {
+        latestRef.current = m;
+        setMetrics(m);
+      },
+      // 诊断面板需要攒下全部音频才能导出 WAV。主链路不这么做 —— 那边逐批
+      // 转发给 ASR 就完了，攒着只会吃掉内存（10 分钟 19MB，违反 A8）。
+      (pcm) => {
+        chunksRef.current.push(pcm);
+      }
+    );
   }, []);
 
   /**
@@ -89,6 +98,7 @@ export default function DiagPanel() {
   const start = useCallback(async () => {
     setError('');
     setSavedPath('');
+    chunksRef.current = [];
     try {
       await engineRef.current?.start();
       setRunning(true);
@@ -102,12 +112,13 @@ export default function DiagPanel() {
   }, []);
 
   const stopAndSave = useCallback(async () => {
-    const pcm = await engineRef.current?.stop();
+    await engineRef.current?.stop();
     setRunning(false);
-    if (!pcm || pcm.length === 0) return;
 
-    const wav = encodeWav16k(pcm);
-    const path = await window.voicepilot.saveWav(new Uint8Array(wav));
+    const chunks = chunksRef.current;
+    if (chunks.length === 0) return;
+    const pcm = concatChunks(chunks);
+    const path = await window.voicepilot.saveWav(new Uint8Array(encodeWav16k(pcm)));
     setSavedPath(path);
 
     // 打进终端（开发模式下主进程会转发渲染进程 console），便于直接抄进 PRD。
@@ -277,6 +288,17 @@ export default function DiagPanel() {
       <span style={styles.hint}> 贴进 PRD §5.2 的实测表</span>
     </div>
   );
+}
+
+function concatChunks(chunks: Int16Array[]): Int16Array {
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const out = new Int16Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.length;
+  }
+  return out;
 }
 
 function copyResult(m: CaptureMetrics | null) {

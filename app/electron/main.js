@@ -6,21 +6,19 @@ import {
   globalShortcut,
   screen,
   nativeImage,
-  ipcMain,
   protocol,
-  shell,
 } from 'electron';
 import { dirname, extname, join, resolve, sep } from 'node:path';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { registerIpc } from './ipc.js';
 
 /**
- * VoicePilot 主进程。
+ * VoicePilot 主进程 —— 应用外壳。
  *
- * 当前是 M0 阶段的骨架，只负责把三件事跑通：
- *   1. 托盘常驻
- *   2. 全局快捷键
- *   3. 一个不抢焦点的悬浮条窗口
+ * 只负责四件事：托盘常驻、全局快捷键、不抢焦点的悬浮条窗口、app:// 协议。
+ * 听写业务（ASR 会话、状态机、音频队列、埋点）在 ipc.js 及其下游模块里，
+ * 那些才是主进程的重心。
  *
  * 「不抢焦点」是这个程序最硬的约束（PRD §1.2）：从悬浮条出现到消失，
  * 目标应用的光标位置、选区、输入焦点、输入法状态都不得发生任何变化。
@@ -37,7 +35,6 @@ const BAR = { width: 560, height: 148, margin: 24 };
 let tray = null;
 let bar = null;
 let diag = null;
-let rendererReady = false;
 
 /**
  * 是否正在走退出流程。
@@ -53,13 +50,17 @@ let rendererReady = false;
  */
 let isQuitting = false;
 
-function requestQuit() {
+function requestQuit(exitCode = 0) {
   isQuitting = true;
+  // 自测这类无人值守的场景要把成败传给调用方（脚本 / CI），而 app.quit()
+  // 不携带退出码，只能走 app.exit()。正常退出仍走 app.quit() 的干净流程。
+  if (exitCode !== 0) {
+    app.exit(exitCode);
+    return;
+  }
   app.quit();
 }
 
-// 渲染进程还没加载完时按了快捷键，先记下来，加载完再补发。
-let pendingToggle = false;
 
 // ---------------------------------------------------------------- app:// 协议
 
@@ -186,14 +187,6 @@ function createBar() {
 
   attachDevLogging(bar);
 
-  bar.webContents.once('did-finish-load', () => {
-    rendererReady = true;
-    if (pendingToggle) {
-      pendingToggle = false;
-      bar.webContents.send('vp:toggle');
-    }
-  });
-
   loadRenderer(bar);
 }
 
@@ -249,6 +242,27 @@ function createDiagWindow() {
   });
 }
 
+/**
+ * 界面自测用的隐藏窗口。
+ * show:false —— 断言读的是 DOM 的 textContent，点击也是程序化的，
+ * 都不需要真的把窗口显示出来；不显示还能避免测试时窗口乱闪。
+ */
+function createUiTestWindow() {
+  const win = new BrowserWindow({
+    width: 900,
+    height: 700,
+    show: false,
+    webPreferences: {
+      preload: join(HERE, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  attachDevLogging(win);
+  win.loadURL('app://voicepilot/index.html#uitest');
+  return win;
+}
+
 // ---------------------------------------------------------------- 托盘与快捷键
 
 function createTray() {
@@ -258,7 +272,9 @@ function createTray() {
   tray.setToolTip('VoicePilot 闻字');
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: '显示悬浮条', click: () => bar?.show() },
+      // 必须用 showInactive()：show() 会激活窗口，抢走目标应用的焦点，
+      // 直接违反 A2「全过程不抢焦点」。
+      { label: '显示悬浮条', click: () => bar?.showInactive() },
       { label: '隐藏悬浮条', click: () => bar?.hide() },
       { type: 'separator' },
       { label: '采集诊断（M1）', click: () => createDiagWindow() },
@@ -268,17 +284,15 @@ function createTray() {
   );
 }
 
-function registerShortcuts() {
+function registerShortcuts(machine) {
   // PRD §4.2：默认 macOS ⌥Space，Windows Ctrl+Shift+Space。
   // Windows 上不能用 Alt+Space（系统菜单）或 Win+Space（输入法切换）。
   const accel = process.platform === 'darwin' ? 'Alt+Space' : 'Ctrl+Shift+Space';
 
   const ok = globalShortcut.register(accel, () => {
-    if (!rendererReady) {
-      pendingToggle = true;
-      return;
-    }
-    bar?.webContents.send('vp:toggle');
+    // 直接驱动状态机，不再经渲染进程转发：
+    // 状态只有一个源头（主进程），渲染进程只负责显示，避免两边状态打架。
+    void machine.toggle();
   });
 
   if (!ok) {
@@ -289,42 +303,47 @@ function registerShortcuts() {
   }
 }
 
-ipcMain.on('vp:renderer-ready', (_e, info) => {
-  console.log(`[渲染进程] 已就绪 platform=${info.platform} chrome=${info.chrome}`);
-});
-
-ipcMain.on('vp:mouse-passthrough', (_e, passthrough) => {
-  bar?.setIgnoreMouseEvents(Boolean(passthrough), { forward: true });
-});
-
-/**
- * 把采集的 WAV 写到 userData/captures 下。
- * 不走保存对话框：spike 阶段要反复导出，每次选路径纯属折磨。
- */
-ipcMain.handle('vp:save-wav', async (_e, bytes) => {
-  const dir = join(app.getPath('userData'), 'captures');
-  await mkdir(dir, { recursive: true });
-
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const file = join(dir, `capture-${stamp}.wav`);
-  await writeFile(file, Buffer.from(bytes));
-  console.log(`[采集] 已导出 ${file}（${(bytes.length / 1024 / 1024).toFixed(2)} MB）`);
-  return file;
-});
-
-ipcMain.on('vp:reveal-path', (_e, path) => {
-  shell.showItemInFolder(path);
-});
-
-ipcMain.on('vp:quit', () => requestQuit());
 
 // ---------------------------------------------------------------- 生命周期
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // 离线自测：不建任何窗口，跑完就退出。这样它能在无人值守的机器上跑，
+  // 并且验的就是主进程的真实路径（含 config.js 的 app.isPackaged 守卫）。
+  // 协议与 IPC 必须先注册：自测窗口也走 app:// 协议，也要用到 vp:copy 等通道。
+  // 注册动作本身没有副作用，放在分支之前最省心。
   registerAppProtocol();
+  const machine = registerIpc({ getBar: () => bar, requestQuit });
+
+  // 前两个自测都是「不建窗口、跑完就退」，可以在无人值守的机器上跑，
+  // 验的也都是主进程的真实路径。
+  const selftest = process.env.VP_ASR_SELFTEST
+    ? './selftest/asr.js'
+    : process.env.VP_SM_SELFTEST
+      ? './selftest/machine.js'
+      : null;
+
+  // 界面自测需要一个隐藏窗口来渲染，结果由 vp:uitest-result 回报（见 ipc.js）
+  if (process.env.VP_UI_SELFTEST) {
+    createUiTestWindow();
+    return;
+  }
+
+  if (selftest) {
+    const mod = await import(selftest);
+    const run = mod.runAsrSelftest ?? mod.runMachineSelftest;
+    try {
+      const r = await run();
+      requestQuit(r.ok ? 0 : 1);
+    } catch (e) {
+      console.error(`[自测] 异常终止：${e?.stack ?? e}`);
+      requestQuit(1);
+    }
+    return;
+  }
+
   createBar();
   createTray();
-  registerShortcuts();
+  registerShortcuts(machine);
 
   // M1 阶段要反复跑采集诊断，而托盘图标还是空图（createTray 里的 TODO），
   // 小到几乎点不中。开发时用 VP_OPEN_DIAG=1 直接把诊断窗口开出来。

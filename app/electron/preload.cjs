@@ -25,6 +25,13 @@ ipcRenderer.send('vp:renderer-ready', {
   chrome: process.versions.chrome,
 });
 
+/** 订阅一个主进程广播，返回取消订阅函数。 */
+function subscribe(channel, callback) {
+  const handler = (_e, payload) => callback(payload);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
 contextBridge.exposeInMainWorld('voicepilot', {
   platform: process.platform,
 
@@ -39,6 +46,74 @@ contextBridge.exposeInMainWorld('voicepilot', {
     const handler = () => callback();
     ipcRenderer.on('vp:toggle', handler);
     return () => ipcRenderer.removeListener('vp:toggle', handler);
+  },
+
+  // ---------------------------------------------------------------- 听写会话
+  //
+  // 注意方向：这里只传音频与状态，**不传任何凭据**。API Key 自始至终只在
+  // 主进程里（PRD §5.8），渲染进程拿不到，也就不可能泄给页面上的任何脚本。
+
+  /** 触发一次状态转换（五态下语义不同，由主进程状态机决定）。 */
+  toggle() {
+    return ipcRenderer.invoke('vp:session/toggle');
+  },
+
+  /** 拉一次当前状态。渲染进程启动时可能错过了之前的广播。 */
+  syncState() {
+    return ipcRenderer.invoke('vp:state/sync');
+  },
+
+  /** 采集失败上报（麦克风被占用 / 未授权）。只有渲染进程知道原因。 */
+  captureFailed(message) {
+    ipcRenderer.send('vp:session/capture-failed', message);
+  },
+
+  /** 音频帧上行。meta 是 {seq, cumSamples}，pcm 是 Uint8Array。 */
+  sendAudio(meta, pcm) {
+    ipcRenderer.send('vp:audio/chunk', meta, pcm);
+  },
+
+  /** 首帧绘制完成，用于「快捷键 → 上屏」这项延迟。传 epoch 毫秒。 */
+  reportPainted(atEpochMs) {
+    ipcRenderer.send('vp:ui/painted', atEpochMs);
+  },
+
+  /**
+   * 复制。返回是否写入成功（主进程会读回剪贴板核对）。
+   * 按 2026-09-06 的决定：覆盖剪贴板，不恢复原内容。
+   */
+  copy(text) {
+    return ipcRenderer.invoke('vp:copy', text);
+  },
+
+  /** @param cb 收到 (state, notice, truncated) */
+  onState(cb) {
+    return subscribe('vp:state', cb);
+  },
+
+  /** @param cb 收到识别结果事件 */
+  onPartial(cb) {
+    return subscribe('vp:asr/partial', cb);
+  },
+
+  /** @param cb 收到 {kind, message, preserveText} */
+  onError(cb) {
+    return subscribe('vp:error', cb);
+  },
+
+  /** @param cb 收到 {seq, pending}，用于渲染进程侧的背压判断 */
+  onAck(cb) {
+    return subscribe('vp:audio/ack', cb);
+  },
+
+  /** @param cb 会话结束时收到延迟摘要 */
+  onMetrics(cb) {
+    return subscribe('vp:metrics', cb);
+  },
+
+  /** 界面自测跑完回报结果，由主进程决定退出码。 */
+  reportUiTestResult(result) {
+    ipcRenderer.send('vp:uitest-result', result);
   },
 
   /**

@@ -25,6 +25,16 @@
         -webkit-font-smoothing: antialiased;
       }
       #root { height: 100%; }
+
+      /* 悬浮条文本区的细滚动条。Electron 是 Chromium，只认 -webkit- 前缀，
+         不写的话默认滚动条在 148px 的小窗里又宽又丑 */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.34); }
     </style>
   </head>
   <body>

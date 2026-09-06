@@ -98,7 +98,6 @@ export class CaptureEngine {
   private source: MediaStreamAudioSourceNode | null = null;
   private sink: AudioNode | null = null;
 
-  private chunks: Int16Array[] = [];
   private timer: number | null = null;
 
   private batches = 0;
@@ -126,15 +125,24 @@ export class CaptureEngine {
   private device: DeviceInfo | null = null;
   private state: CaptureMetrics['state'] = 'idle';
 
-  constructor(private readonly onTick: (m: CaptureMetrics) => void) {}
+  /**
+   * @param onTick  每 200ms 回推一次读数
+   * @param onBatch 每收到一批（1600 样本 / 100ms）就回调。**音频不再在引擎里累积** ——
+   *   攒在内存里 10 分钟就是 19MB，直接违反验收标准 A8。需要留存的一方
+   *   （诊断面板导出 WAV）自己按需累积，不需要的一方（主链路直接转发给 ASR）
+   *   一分不占。
+   */
+  constructor(
+    private readonly onTick: (m: CaptureMetrics) => void,
+    private readonly onBatch?: (pcm: Int16Array) => void
+  ) {}
 
   async start(): Promise<void> {
     if (this.state !== 'idle') return;
     this.state = 'starting';
 
     // 同一实例会反复 start/stop（诊断面板上点「开始采集」不止一次）。
-    // 不清空的话，第二次的 WAV 会混进上一段音频，读数也全是累加值。
-    this.chunks = [];
+    // 不清空的话，第二次的读数全是累加值。
     this.recent = [];
     this.clock = [];
     this.batches = 0;
@@ -177,6 +185,15 @@ export class CaptureEngine {
         channelCount: 1,
       },
     });
+
+    // getUserMedia 是异步的，这期间 stop() 可能已经跑过（用户快速连按两次快捷键）。
+    // 此时 ctx 已被关闭，若继续往下会在已关闭的 context 上 addModule / resume，
+    // 抛出一堆莫名其妙且难排查的错误。这里一旦发现「我不再是当前那次启动」，
+    // 就把刚拿到的轨停掉、干净退出。
+    if (this.state !== 'starting') {
+      this.stream.getTracks().forEach((t) => t.stop());
+      throw new Error('采集已被取消');
+    }
 
     const settings = this.stream.getAudioTracks()[0].getSettings();
     this.device = {
@@ -258,18 +275,9 @@ export class CaptureEngine {
     this.state = 'idle';
   }
 
-  async stop(): Promise<Int16Array> {
+  /** 停止采集。音频已通过 onBatch 逐批交出，这里不再返回任何 PCM。 */
+  async stop(): Promise<void> {
     await this.#teardown();
-
-    // 拼接所有批次。总样本数应当 ≈ 时长 × 16000。
-    const total = this.chunks.reduce((n, c) => n + c.length, 0);
-    const out = new Int16Array(total);
-    let offset = 0;
-    for (const c of this.chunks) {
-      out.set(c, offset);
-      offset += c.length;
-    }
-    return out;
   }
 
   #onBatch({ t, pcm, glitches, lostFrames }: WorkletMessage) {
@@ -289,7 +297,7 @@ export class CaptureEngine {
       i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
     }
 
-    this.chunks.push(i16);
+    this.onBatch?.(i16);
     this.batches += 1;
     this.totalSamples += pcm.length;
     this.recent.push({ at: now, samples: pcm.length });
