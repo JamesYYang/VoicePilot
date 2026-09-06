@@ -42,24 +42,35 @@ export async function streamPolish({ text, scene, tone, onDelta, onDone, onError
   const decoder = new TextDecoder();
   let buf = '';
 
+  // 处理单行 SSE：strip → 校验 data: 前缀 → 跳过 [DONE] → JSON.parse → 提取 delta.content。
+  const processLine = (line) => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (data === '[DONE]') return;
+
+    let j;
+    try {
+      j = JSON.parse(data);
+    } catch {
+      return;
+    }
+    const delta = j.choices?.[0]?.delta?.content ?? '';
+    if (delta) onDelta(delta);
+  };
+
   // 切出完整行（含 `\n`），逐行解析 SSE；返回剩余的不完整片段。
-  const drain = (s) => {
+  // flush=true 时，把残留的尾行（可能无 `\n`）也作为一行处理。
+  const drain = (s, flush = false) => {
     let idx;
     while ((idx = s.indexOf('\n')) >= 0) {
       const line = s.slice(0, idx).trim();
       s = s.slice(idx + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') continue;
-
-      let j;
-      try {
-        j = JSON.parse(data);
-      } catch {
-        continue;
-      }
-      const delta = j.choices?.[0]?.delta?.content ?? '';
-      if (delta) onDelta(delta);
+      processLine(line);
+    }
+    if (flush) {
+      const tail = s.trim();
+      if (tail) processLine(tail);
+      s = '';
     }
     return s;
   };
@@ -73,7 +84,7 @@ export async function streamPolish({ text, scene, tone, onDelta, onDone, onError
 
   // 流结束 flush：解码器内部可能仍残留未输出的字节；处理无 `\n` 的尾行。
   buf += decoder.decode();
-  drain(buf);
+  drain(buf, true);
 
   onDone();
 }
