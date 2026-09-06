@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import PolishView from './PolishView';
+import HistoryView from './HistoryView';
 
 /**
  * 主应用（Studio）外壳 —— 润色工作区的骨架（Task 3）。
@@ -41,6 +42,8 @@ export default function Studio({ bridge }: { bridge?: Window['voicepilot'] } = {
       <main style={styles.content}>
         {view === 'polish' ? (
           <PolishView bridge={bridge} />
+        ) : view === 'history' ? (
+          <HistoryView bridge={bridge} />
         ) : (
           <div style={styles.placeholder}>待实现</div>
         )}
