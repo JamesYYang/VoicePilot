@@ -58,6 +58,8 @@ export async function runUiTest() {
 
   const sentFrames: { seq: number; cumSamples: number }[] = [];
   let toggleCount = 0;
+  // 用对象 holder 而不是 `let x: string|null`：TS 会把它在流里收窄成 null/never
+  const openStudioCtl: { arg: string | null } = { arg: null };
   let captureStarted = false;
   let captureStopped = false;
   // 初值给空函数而不是 null：这样类型是「永远可调用」，
@@ -89,6 +91,10 @@ export async function runUiTest() {
     // 表现是「点了复制毫无反应」，且控制台没有一行相关报错。
     copy: (text: string) => real.copy(text),
     reportPainted: (at: number) => real.reportPainted(at),
+    openStudio: (text: string) => {
+      openStudioCtl.arg = text;
+      return Promise.resolve(true);
+    },
     toggle: () => {
       toggleCount += 1;
       return Promise.resolve(IDLE);
@@ -235,6 +241,19 @@ export async function runUiTest() {
       `toggle 调用 ${toggleCount} 次`);
   }
   check('复制内容与界面文本一致', expectedText.includes('三件事'));
+
+  // ---- 6.5 润色：打开主应用并关闭悬浮条（两者不同时出现）----
+  fire('state', { state: 'reviewing', notice: null, truncated: false });
+  await flush();
+  toggleCount = 0;
+  openStudioCtl.arg = null;
+  clickButton('润色');
+  await flush();
+  // 显式断言绕开 TS 对对象属性的流收窄（否则被收窄成 never）
+  const openedArg = openStudioCtl.arg as string | null;
+  check('点「润色」调用 openStudio 且带全文', (openedArg ?? '').includes('三件事'),
+    JSON.stringify(openedArg));
+  check('点「润色」后悬浮条关闭（触发 toggle）', toggleCount === 1, `toggle 调用 ${toggleCount} 次`);
 
   // ---- 7. 背压：未确认帧数超上限就丢 ----
   fire('state', { state: 'listening', notice: null, truncated: false });

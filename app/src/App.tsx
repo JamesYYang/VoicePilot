@@ -311,7 +311,14 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
       {snap.state === 'reviewing' && (
         <div style={styles.actions}>
-          <button style={styles.button} onClick={() => void vp.openStudio(fullText)}>
+          <button
+            style={styles.button}
+            onClick={() => {
+              void vp.openStudio(fullText);
+              // 悬浮条与主应用不同时出现：润色打开主应用后，悬浮条随即关闭
+              void vp.toggle();
+            }}
+          >
             润色
           </button>
           <button style={styles.button} onClick={copy} disabled={fullText.length === 0}>
