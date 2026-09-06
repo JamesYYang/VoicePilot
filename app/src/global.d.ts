@@ -59,8 +59,14 @@ interface VoicePilotBridge {
   openStudio(text: string): Promise<boolean>;
   /** 主应用挂载时拉 {text, scenes, tones} */
   syncStudio(): Promise<{ text: string; scenes: string[]; tones: string[] }>;
-  /** 发起润色（Task 5 接流式；本任务 stub） */
+  /** 发起润色。流式结果经 onPolishDelta/onPolishDone/onPolishError 回传 */
   startPolish(payload: { text: string; scene: string; tone: string }): Promise<void>;
+  /** 润色流式增量，逐块推送 */
+  onPolishDelta(cb: (p: { text: string }) => void): () => void;
+  /** 润色流结束 */
+  onPolishDone(cb: () => void): () => void;
+  /** 润色失败，收到 {message} */
+  onPolishError(cb: (p: { message: string }) => void): () => void;
   /** 主进程在窗口已存在时推送新文本，编辑器据此刷新 */
   onStudioRefresh(cb: (p: { text: string }) => void): () => void;
 }

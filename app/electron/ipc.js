@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
 import { createStudioWindow, getStudioWindow } from './studio.js';
 import { SCENES, TONES } from './llm/prompt.js';
+import { streamPolish } from './llm/polish.js';
 
 /**
  * 所有 IPC 的注册点。main.js 只管应用外壳（窗口、托盘、快捷键、生命周期），
@@ -149,10 +150,25 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
   }));
 
   /**
-   * 润色入口。Task 5 接入真正的流式润色；本任务先 stub，保证界面点
-   * 「润色」有处可调、链路能通。
+   * 润色入口（Task 5）：调用 streamPolish 流式润色，delta 逐块推回渲染进程。
+   * 结果走三个事件：vp:polish/delta（增量）/ done（收尾）/ error（失败）。
    */
-  ipcMain.handle('vp:polish/start', async () => {});
+  ipcMain.handle('vp:polish/start', async (_e, { text, scene, tone }) => {
+    const win = getStudioWindow();
+    const emit = (channel, payload) => win?.webContents.send(channel, payload);
+
+    try {
+      await streamPolish({
+        text, scene, tone,
+        onDelta: (d) => emit('vp:polish/delta', { text: d }),
+        onDone: () => emit('vp:polish/done', {}),
+        onError: (e) => emit('vp:polish/error', { message: e.message }),
+      });
+    } catch (e) {
+      emit('vp:polish/error', { message: e?.message ?? String(e) });
+    }
+    return true;
+  });
 
   return machine;
 }

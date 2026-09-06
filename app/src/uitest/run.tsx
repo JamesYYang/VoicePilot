@@ -297,6 +297,10 @@ export async function runUiTest() {
   // 用对象属性兜住刷新监听器：TS 会把 `let x = null` 收窄成 null，
   // 属性访问则不会被这样收窄。
   const studioRefresh: { cb: ((p: { text: string }) => void) | null } = { cb: null };
+  // 润色流式事件监听器，供测试按真实签名 fire 载荷（与 studioRefresh 同款模式）
+  const studioDelta: { cb: ((p: { text: string }) => void) | null } = { cb: null };
+  const studioDone: { cb: (() => void) | null } = { cb: null };
+  const studioError: { cb: ((p: { message: string }) => void) | null } = { cb: null };
   const studioBridge = {
     ...real,
     onStudioRefresh: (cb: (p: { text: string }) => void) => {
@@ -308,6 +312,18 @@ export async function runUiTest() {
     startPolish: (p: { text: string; scene: string; tone: string }) => {
       polishCall.payload = p;
       return Promise.resolve();
+    },
+    onPolishDelta: (cb: (p: { text: string }) => void) => {
+      studioDelta.cb = cb;
+      return () => {};
+    },
+    onPolishDone: (cb: () => void) => {
+      studioDone.cb = cb;
+      return () => {};
+    },
+    onPolishError: (cb: (p: { message: string }) => void) => {
+      studioError.cb = cb;
+      return () => {};
     },
   };
 
@@ -347,6 +363,29 @@ export async function runUiTest() {
     'Studio 编辑器随 studioRefresh 刷新为新文本',
     studioContainer.querySelector('textarea')?.value === '第二次口述的新文本',
     JSON.stringify(studioContainer.querySelector('textarea')?.value)
+  );
+
+  // ---- 11. 流式增量：主进程逐块推 delta → 输出区逐字追加（Task 5）----
+  check(
+    '润色中「润色」按钮禁用',
+    studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.disabled ===
+      true
+  );
+  studioDelta.cb?.({ text: '润色后的' });
+  studioDelta.cb?.({ text: '第一句' });
+  await flush();
+  const outputEl = studioContainer.querySelector('[data-testid="polish-output"]');
+  check(
+    '润色 delta 逐字追加到输出区',
+    outputEl?.textContent === '润色后的第一句',
+    JSON.stringify(outputEl?.textContent)
+  );
+  studioDone.cb?.();
+  await flush();
+  check(
+    '润色完成后按钮恢复可点',
+    studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.disabled ===
+      false
   );
 
   const failed = results.filter((r) => !r.ok);

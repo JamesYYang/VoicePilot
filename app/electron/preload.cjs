@@ -162,9 +162,24 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:studio/sync');
   },
 
-  /** 发起润色（Task 5 接流式；本任务 stub）。 */
+  /** 发起润色。流式结果经 onPolishDelta/onPolishDone/onPolishError 回传。 */
   startPolish(payload) {
     return ipcRenderer.invoke('vp:polish/start', payload);
+  },
+
+  /** @param cb 收到 {text}，润色流式增量，逐块推送 */
+  onPolishDelta(cb) {
+    return subscribe('vp:polish/delta', cb);
+  },
+
+  /** @param cb 润色流结束 */
+  onPolishDone(cb) {
+    return subscribe('vp:polish/done', cb);
+  },
+
+  /** @param cb 收到 {message}，润色失败 */
+  onPolishError(cb) {
+    return subscribe('vp:polish/error', cb);
   },
 
   /** 主进程在窗口已存在时推送新文本，编辑器据此刷新。 */

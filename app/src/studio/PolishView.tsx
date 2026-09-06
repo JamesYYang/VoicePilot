@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 /**
- * 润色工作区（Task 4）。
+ * 润色工作区（Task 4/5）。
  *
- * 三块：顶部工具条（场景/语气下拉 + 「润色」按钮）、中间可编辑文本框、
- * 底部（「复制」「关闭」）。挂载时 syncStudio() 把悬浮条转出的文本与
- * 场景/语气选项拉进来；点「润色」把 {text, scene, tone} 交给主进程 ——
- * vp.startPolish 本任务还是 stub，Task 5 才接入真正的流式润色。
+ * 三块：顶部工具条（场景/语气下拉 + 「润色」按钮）、中间并排（左原文可编辑、
+ * 右润色结果流式上屏）、底部（「复制」「关闭」）。挂载时 syncStudio() 把悬浮条
+ * 转出的文本与场景/语气选项拉进来；点「润色」把 {text, scene, tone} 交给主进程，
+ * 结果经 onPolishDelta 逐块增量追加到输出区，onPolishDone 收尾、onPolishError
+ * 显示错误（Task 5 接入真正的流式润色）。
  *
  * 亮色样式（spec §2）：白底深字，与悬浮条的暗色浮层区分。
  */
@@ -27,6 +28,9 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
   const [scene, setScene] = useState('');
   const [tone, setTone] = useState('');
   const [copied, setCopied] = useState(false);
+  const [output, setOutput] = useState('');
+  const [polishing, setPolishing] = useState(false);
+  const [polishError, setPolishError] = useState<string | null>(null);
 
   useEffect(() => {
     void vp.syncStudio().then((s: StudioSync) => {
@@ -42,7 +46,25 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
   // 否则编辑器会一直显示第一次的文本。订阅返回的取消函数即清理函数。
   useEffect(() => vp.onStudioRefresh(({ text: next }) => setText(next)), [vp]);
 
+  // 订阅润色流式事件：delta 逐块追加，done/error 收尾（polishing=false）。
+  useEffect(() => {
+    const offDelta = vp.onPolishDelta(({ text: d }) => setOutput((prev) => prev + d));
+    const offDone = vp.onPolishDone(() => setPolishing(false));
+    const offError = vp.onPolishError(({ message }) => {
+      setPolishError(message);
+      setPolishing(false);
+    });
+    return () => {
+      offDelta();
+      offDone();
+      offError();
+    };
+  }, [vp]);
+
   const run = () => {
+    setOutput('');
+    setPolishError(null);
+    setPolishing(true);
     void vp.startPolish({ text, scene, tone });
   };
 
@@ -90,19 +112,31 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           data-testid="polish-run"
           style={styles.run}
           onClick={run}
-          disabled={text.trim().length === 0}
+          disabled={text.trim().length === 0 || polishing}
         >
-          润色
+          {polishing ? '润色中…' : '润色'}
         </button>
       </div>
 
-      <textarea
-        data-testid="polish-text"
-        style={styles.editor}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="在此输入或粘贴要润色的文本"
-      />
+      <div style={styles.split}>
+        <div style={styles.pane}>
+          <div style={styles.paneLabel}>原文</div>
+          <textarea
+            data-testid="polish-text"
+            style={styles.editor}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="在此输入或粘贴要润色的文本"
+          />
+        </div>
+
+        <div style={styles.pane}>
+          <div style={styles.paneLabel}>润色结果</div>
+          <div data-testid="polish-output" style={styles.output}>
+            {output}
+          </div>
+        </div>
+      </div>
 
       <div style={styles.footer}>
         <button
@@ -121,6 +155,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           关闭
         </button>
         {copied && <span style={styles.hint}>已复制到剪贴板</span>}
+        {polishError && <span style={styles.error}>润色失败：{polishError}</span>}
       </div>
     </div>
   );
@@ -174,6 +209,24 @@ const styles = {
     fontWeight: 600,
     cursor: 'pointer',
   },
+  split: {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    gap: 12,
+  },
+  pane: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  },
+  paneLabel: {
+    color: '#6b7280',
+    fontSize: 12,
+    flexShrink: 0,
+  },
   editor: {
     flex: 1,
     minHeight: 0,
@@ -189,6 +242,20 @@ const styles = {
     fontFamily: 'inherit',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
+  },
+  output: {
+    flex: 1,
+    minHeight: 0,
+    padding: 12,
+    borderRadius: 8,
+    border: '1px solid #d1d5db',
+    background: '#f9fafb',
+    color: '#111827',
+    fontSize: 13,
+    lineHeight: 1.6,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    overflowY: 'auto',
   },
   footer: {
     display: 'flex',
@@ -217,5 +284,9 @@ const styles = {
   hint: {
     color: '#6b7280',
     fontSize: 11,
+  },
+  error: {
+    color: '#dc2626',
+    fontSize: 12,
   },
 } satisfies Record<string, CSSProperties>;
