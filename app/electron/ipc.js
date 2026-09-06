@@ -2,7 +2,7 @@ import { app, clipboard, ipcMain, shell } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
-import { createStudioWindow } from './studio.js';
+import { createStudioWindow, getStudioWindow } from './studio.js';
 import { SCENES, TONES } from './llm/prompt.js';
 
 /**
@@ -132,6 +132,12 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
   ipcMain.handle('vp:studio/open', (_e, text) => {
     pendingStudioText = String(text ?? '');
     createStudioWindow({ attachDevLogging });
+    // 窗口已存在时只 focus 不重载，所以这里主动推一次刷新事件，
+    // 让已挂载的编辑器用新文本覆盖旧内容（重复口述→再点润色的场景）。
+    // 对刚创建的窗口发也没关系：渲染进程还没订阅时这条会被丢掉，
+    // 挂载时的 syncStudio() 会兜住「首次打开」这一路。
+    const win = getStudioWindow();
+    if (win) win.webContents.send('vp:studio/refresh', { text: pendingStudioText });
     return true;
   });
 

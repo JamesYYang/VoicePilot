@@ -166,4 +166,9 @@ contextBridge.exposeInMainWorld('voicepilot', {
   startPolish(payload) {
     return ipcRenderer.invoke('vp:polish/start', payload);
   },
+
+  /** 主进程在窗口已存在时推送新文本，编辑器据此刷新。 */
+  onStudioRefresh(cb) {
+    return subscribe('vp:studio/refresh', cb);
+  },
 });

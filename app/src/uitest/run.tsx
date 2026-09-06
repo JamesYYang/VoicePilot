@@ -294,8 +294,15 @@ export async function runUiTest() {
     payload: null,
   };
   // 给 Studio 注入假 bridge（与 App 同款模式），不动只读的 window.voicepilot。
+  // 用对象属性兜住刷新监听器：TS 会把 `let x = null` 收窄成 null，
+  // 属性访问则不会被这样收窄。
+  const studioRefresh: { cb: ((p: { text: string }) => void) | null } = { cb: null };
   const studioBridge = {
     ...real,
+    onStudioRefresh: (cb: (p: { text: string }) => void) => {
+      studioRefresh.cb = cb;
+      return () => {};
+    },
     syncStudio: () =>
       Promise.resolve({ text: '测试原文', scenes: ['邮件'], tones: ['正式'] }),
     startPolish: (p: { text: string; scene: string; tone: string }) => {
@@ -329,6 +336,17 @@ export async function runUiTest() {
       polishCall.payload?.scene === '邮件' &&
       polishCall.payload?.tone === '正式',
     JSON.stringify(polishCall.payload)
+  );
+
+  // ---- 10. Studio 已存在时刷新文本（重复口述→再点润色）----
+  // 主进程在窗口已存在时只 focus 不重载，改为推 vp:studio/refresh 事件，
+  // 编辑器必须据此更新，否则用户第二次口述后看到的仍是第一次的文本。
+  studioRefresh.cb?.({ text: '第二次口述的新文本' });
+  await flush();
+  check(
+    'Studio 编辑器随 studioRefresh 刷新为新文本',
+    studioContainer.querySelector('textarea')?.value === '第二次口述的新文本',
+    JSON.stringify(studioContainer.querySelector('textarea')?.value)
   );
 
   const failed = results.filter((r) => !r.ok);

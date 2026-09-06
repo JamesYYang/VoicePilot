@@ -38,6 +38,10 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
     });
   }, [vp]);
 
+  // 窗口已存在时再点「润色」，主进程只 focus 不重载，改为推送刷新事件，
+  // 否则编辑器会一直显示第一次的文本。订阅返回的取消函数即清理函数。
+  useEffect(() => vp.onStudioRefresh(({ text: next }) => setText(next)), [vp]);
+
   const run = () => {
     void vp.startPolish({ text, scene, tone });
   };
