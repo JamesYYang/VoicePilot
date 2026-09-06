@@ -89,6 +89,8 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   const ackedSeqRef = useRef(0);
   const droppedRef = useRef(0);
   const lastEndRef = useRef(0);
+  const historySavedRef = useRef(false);
+  const historyIdRef = useRef<number | null>(null);
 
   const captureRef = useRef<{ start: () => Promise<void>; stop: () => Promise<void> } | null>(null);
   const errorTimerRef = useRef<number | null>(null);
@@ -217,6 +219,8 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       ackedSeqRef.current = 0;
       droppedRef.current = 0;
       lastEndRef.current = 0;
+      historySavedRef.current = false;
+      historyIdRef.current = null;
 
       // 「快捷键 → 上屏」的终点是**真的画出来**的那一刻，所以等一帧再回报。
       // performance.timeOrigin + performance.now() 是 epoch 毫秒，
@@ -227,6 +231,18 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     }
     prevStateRef.current = snap.state;
   }, [snap.state]);
+
+  // reviewing 时把原文写入历史一次。文本归渲染进程所有，主进程只落库。
+  // 每次会话只存一次：historySavedRef 在 warming 时重置。
+  useEffect(() => {
+    if (snap.state !== 'reviewing') return;
+    if (historySavedRef.current) return;
+    if (fullText.trim().length === 0) return;
+    historySavedRef.current = true;
+    void vp.historySave({ text: fullText }).then((r) => {
+      historyIdRef.current = r?.id ?? null;
+    });
+  }, [snap.state, fullText, vp]);
 
   // 移入时关闭穿透（按钮可点），移出时恢复穿透（不挡住下面的应用）
   useEffect(() => {
@@ -314,7 +330,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
           <button
             style={styles.button}
             onClick={() => {
-              void vp.openStudio(fullText);
+              void vp.openStudio({ text: fullText, historyId: historyIdRef.current ?? undefined });
               // 悬浮条与主应用不同时出现：润色打开主应用后，悬浮条随即关闭
               void vp.toggle();
             }}
@@ -360,22 +376,22 @@ const styles = {
     margin: 8,
     padding: '12px 16px',
     borderRadius: 12,
-    background: 'rgba(23, 26, 33, 0.94)',
-    border: '1px solid #262b36',
+    background: 'rgba(255, 255, 255, 0.95)',
+    border: '1px solid #e5e7eb',
     display: 'flex',
     flexDirection: 'column' as const,
     gap: 8,
     fontSize: 13,
     lineHeight: 1.6,
-    color: '#e5e7eb',
+    color: '#1f2937',
     userSelect: 'none' as const,
     overflow: 'hidden',
   },
   head: { display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },
-  badge: { color: '#93c5fd', fontSize: 11, letterSpacing: 0.5 },
-  notice: { color: '#fbbf24', fontSize: 11 },
-  warn: { color: '#fbbf24', fontSize: 11 },
-  error: { color: '#fca5a5', fontSize: 11, flexShrink: 0 },
+  badge: { color: '#1d4ed8', fontSize: 11, letterSpacing: 0.5 },
+  notice: { color: '#d97706', fontSize: 11 },
+  warn: { color: '#d97706', fontSize: 11 },
+  error: { color: '#dc2626', fontSize: 11, flexShrink: 0 },
   text: {
     flex: 1,
     minHeight: 0,
@@ -387,23 +403,23 @@ const styles = {
     wordBreak: 'break-word' as const,
     userSelect: 'text' as const, // 允许选中复制，否则「查看」形同虚设
   },
-  draft: { color: '#8b93a7' },
+  draft: { color: '#9ca3af' },
   actions: { display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },
   button: {
     padding: '4px 14px',
     borderRadius: 6,
-    border: '1px solid #1f4ed8',
-    background: '#16233f',
-    color: '#e5e7eb',
+    border: '1px solid #1d4ed8',
+    background: '#1d4ed8',
+    color: '#ffffff',
     fontSize: 12,
     cursor: 'pointer' as const,
   },
   ghost: {
     padding: '4px 10px',
     borderRadius: 6,
-    border: '1px solid #333a47',
+    border: '1px solid #d1d5db',
     background: 'transparent',
-    color: '#8b93a7',
+    color: '#6b7280',
     fontSize: 12,
     cursor: 'pointer' as const,
   },
