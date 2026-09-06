@@ -79,7 +79,11 @@
 - **窗口**：复用现有 Electron 结构，新建一个可聚焦窗口，走 `app://` 协议的 `#studio` 路由（与现有 `#diag` 同一套 hash 路由机制，见 `app/src/main.tsx`）
 - **状态与数据在哪个进程**：
   - 历史读写（SQLite）放**主进程**，渲染进程经 IPC 访问——延续 M2 的 Key/网络都在主进程的架构
-  - 润色（LLM 流式）**直连百炼文本模型**，复用现有 `loadCredentials()`（`DASHSCOPE_API_KEY` + workspace，与 ASR 同一把 Key），开在**主进程**。模型：**DeepSeek-V4-Pro-0813**（2026-09-06 用户指定；**精确 model ID 需在 spike 中核实**，百炼控制台的模型 ID 是大写/日期后缀敏感）
+  - 润色（LLM 流式）**直连百炼文本模型**，复用现有 `loadCredentials()`（`DASHSCOPE_API_KEY` + workspace，与 ASR 同一把 Key），开在**主进程**。模型：**deepseek-v4-pro-0813**（已实测：`spike/llm.js`）。
+    - 端点：`https://{workspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions`（OpenAI 兼容）
+    - 鉴权：`Authorization: Bearer <key>` + `X-DashScope-WorkSpace: <ws>`
+    - 流式：SSE，`choices[0].delta.content` 逐块
+    - **坑**：delta 里同时有 `content` 与 `reasoning_content`，后者是思维链，润色只取 `content`，不要显示思考过程
 - **并排显示**是刻意的：口述内容一旦被覆盖就找不回来，润色结果 LLM 可能改变原意，所以显式「采用」才替换，原文始终保留在历史里（PRD §4.4）
 
 ## 9. 非目标（本期不做）
@@ -91,6 +95,6 @@
 
 ## 10. 开放风险
 
-- **模型 ID 待核实**：`DeepSeek-V4-Pro-0813` 是用户指定的百炼文本模型，动手前需在百炼控制台/API 里确认精确的 model ID 字符串（含版本日期后缀），并实测其流式输出可用
+- ~~模型 ID 待核实~~：已实测（`spike/llm.js`）——`deepseek-v4-pro-0813` + OpenAI 兼容端点，流式可用
 - **中文全文搜索分词**：FTS5 trigram 方案需实测效果与体积
 - **悬浮条换亮色**：半透明亮色在白色背景（如 Word 文档）上可读性需实测，可能要加描边或阴影兜底
