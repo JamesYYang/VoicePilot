@@ -241,4 +241,14 @@ contextBridge.exposeInMainWorld('voicepilot', {
   closeOnboarding() {
     return ipcRenderer.invoke('vp:onboarding/close');
   },
+
+  /** 保存用户输入的 API Key + 工作空间 ID（主进程加密落盘）。 */
+  saveKey(payload) {
+    return ipcRenderer.invoke('vp:key/save', payload);
+  },
+
+  /** 关闭「设置 API Key」窗口。 */
+  closeKeyEntry() {
+    return ipcRenderer.invoke('vp:key/close');
+  },
 });

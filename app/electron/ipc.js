@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
 import { createStudioWindow, getStudioWindow } from './studio.js';
 import { getOnboardingWindow } from './onboarding.js';
+import { getKeyEntryWindow } from './key-entry.js';
+import { saveCredentials } from './asr/config.js';
 import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish } from './store.js';
 import { streamPolish } from './llm/polish.js';
 
@@ -232,6 +234,21 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar }
   /** 关闭引导窗。 */
   ipcMain.handle('vp:onboarding/close', () => {
     getOnboardingWindow()?.close();
+    return true;
+  });
+
+  /** 保存用户输入的 API Key + 工作空间 ID（safeStorage 加密落盘，见 asr/config.js）。 */
+  ipcMain.handle('vp:key/save', (_e, { apiKey, workspaceId }) => {
+    const key = String(apiKey ?? '').trim();
+    const ws = String(workspaceId ?? '').trim();
+    if (!key || !ws) throw new Error('API Key 和工作空间 ID 不能为空');
+    saveCredentials({ apiKey: key, workspaceId: ws });
+    return true;
+  });
+
+  /** 关闭「设置 API Key」窗口。 */
+  ipcMain.handle('vp:key/close', () => {
+    getKeyEntryWindow()?.close();
     return true;
   });
 

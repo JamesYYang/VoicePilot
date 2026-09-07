@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { createStudioWindow } from './studio.js';
 import { createOnboardingWindow } from './onboarding.js';
+import { createKeyEntryWindow } from './key-entry.js';
+import { hasCredentials } from './asr/config.js';
 import { getMeta } from './store.js';
 
 /**
@@ -307,6 +309,8 @@ function createTray() {
       { type: 'separator' },
       { label: '采集诊断（M1）', click: () => createDiagWindow() },
       { type: 'separator' },
+      { label: '设置 API Key', click: () => createKeyEntryWindow({ attachDevLogging }) },
+      { type: 'separator' },
       { label: '退出', click: () => requestQuit() },
     ])
   );
@@ -376,6 +380,12 @@ app.whenReady().then(async () => {
   createBar();
   createTray();
   registerShortcuts(machine);
+
+  // 无 API Key 时弹输入窗（打包版没有 .env，靠这里拿 Key；开发期有 .env 则不会弹）。
+  // 将来 F11 配置端点落地后，hasCredentials 会因端点下发而为 true，此窗自然不再出现。
+  if (!hasCredentials()) {
+    createKeyEntryWindow({ attachDevLogging });
+  }
 
   // 首次启动引导窗（F8）—— 暂缓启用（2026-09-06）。
   // 原因：引导的职业选择当前只影响润色默认场景，原设计「职业 → 两组提示词」

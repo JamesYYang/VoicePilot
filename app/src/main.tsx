@@ -42,6 +42,12 @@ async function boot() {
     return;
   }
 
+  if (route === 'key-entry') {
+    const { default: KeyEntry } = await import('./key-entry/KeyEntry');
+    createRoot(container).render(<KeyEntry />);
+    return;
+  }
+
   createRoot(container).render(route === 'diag' ? <DiagPanel /> : <App />);
 }
 

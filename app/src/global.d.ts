@@ -108,6 +108,10 @@ interface VoicePilotBridge {
   saveOnboarding(payload: { profession: string }): Promise<boolean>;
   /** 关闭首次引导窗口 */
   closeOnboarding(): Promise<boolean>;
+  /** 保存用户输入的 API Key + 工作空间 ID（主进程加密落盘） */
+  saveKey(payload: { apiKey: string; workspaceId: string }): Promise<boolean>;
+  /** 关闭「设置 API Key」窗口 */
+  closeKeyEntry(): Promise<boolean>;
 }
 
 interface Window {
