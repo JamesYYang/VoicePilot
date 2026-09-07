@@ -11,11 +11,10 @@
     "hmr": "vite",
     "dev": "VP_DEV_URL=http://localhost:5173 electron .",
     "typecheck": "tsc --noEmit",
-    "dist:win": "vite build && electron-builder --win"
+    "dist:win": "vite build && electron-builder --win",
+    "dist:win:portable": "vite build && electron-builder --win portable"
   },
   "dependencies": {
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
     "ws": "^8.21.3"
   },
   "devDependencies": {
@@ -25,7 +24,32 @@
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^44.2.0",
     "electron-builder": "^26.15.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"
+  },
+  "build": {
+    "appId": "com.voicepilot.app",
+    "productName": "VoicePilot",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/renderer/**/*",
+      "build/**/*",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "build/voicepilot-icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }
