@@ -76,7 +76,7 @@ cp .env.example .env
 - `DASHSCOPE_API_KEY` — API Key
 - `DASHSCOPE_WORKSPACE_ID` — **业务空间 ID**（不是 API Key，两个都要）
 
-> Key 只存在主进程，渲染进程拿不到。当前是**开发期从 `.env` 读取**；正式分发时改为配置端点下发（PRD §5.8 / F11，M5）。
+> Key 只存在主进程，渲染进程拿不到。**开发期**从 `.env` 读取；**打包版**启动时若没有 Key 会弹窗让用户输入，经 `safeStorage`（Windows DPAPI / macOS Keychain）加密存本机。将来 F11 配置端点下发后，弹窗自动不再出现。
 
 ### 2. 跑桌面应用
 
@@ -97,6 +97,32 @@ VP_UI_SELFTEST=1 npx electron .           # 界面自测（隐藏窗口 + 假 br
 VP_STORE_SELFTEST=1 npx electron .        # 存储自测
 VP_SM_SELFTEST=1 npx electron .           # 状态机自测
 ```
+
+---
+
+## 打包与分发（给同事试用）
+
+```bash
+cd app
+npm run dist:win:portable   # 只打便携单文件版（快，推荐发同事试）
+npm run dist:win            # 便携 + NSIS 安装包两个都打
+```
+
+产物在 `app/release/`（已 gitignore）：
+
+| 文件 | 用途 |
+|---|---|
+| `VoicePilot 0.1.0.exe` | 便携单文件版，双击即用 |
+| `VoicePilot Setup 0.1.0.exe` | NSIS 安装包（开始菜单 / 桌面快捷方式 / 卸载） |
+
+**发同事试用的流程**：
+
+1. 把 `VoicePilot 0.1.0.exe` 发给对方
+2. 把 API Key + 工作空间 ID **单独**发给他（不要打进包里）
+3. 对方双击 exe → 首次启动弹「设置 API Key」窗 → 填入 → 即可用
+4. Key 经 `safeStorage` 加密存对方本机，之后不再弹；托盘菜单里也有「设置 API Key」可随时改
+
+> 当前**未做代码签名**，SmartScreen 会提示「未知发布者」，点「仍要运行」即可（内部分发的预期情况，PRD §5.7）。
 
 ---
 
@@ -131,6 +157,8 @@ VP_SM_SELFTEST=1 npx electron .           # 状态机自测
 ## 已知限制 / 下一步
 
 - **macOS 未适配**：M1 的 macOS 半与整个 M3（不抢焦点、权限引导、签名公证）仍等 Mac 到位。
+- **Key 分发是临时的弹窗输入方案**：正式形态是 F11 配置端点下发（Key 不落客户端明文、可轮换），当前先用「启动弹窗输入 + safeStorage 加密落盘」过渡。
+- **未做代码签名**：分发时 SmartScreen 会告警，内测可接受；对外发布前需签名 + 公证。
 - **首次引导暂缓启用**：代码已完成，但「职业 → 两组提示词（ASR + 润色）」还没定，先隐藏（`VP_ENABLE_ONBOARDING=1` 可临时开出来测试），定稿后再回来。
 - **注入光标未做**：v1 输出终点是剪贴板，注入其他应用推迟到后续阶段。
 - **历史搜索未做**：当前历史只支持浏览，全文搜索（FTS5）属下一批。
