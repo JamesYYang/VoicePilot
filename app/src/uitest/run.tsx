@@ -109,6 +109,7 @@ export async function runUiTest() {
       sentFrames.push(meta);
     },
     setMousePassthrough: () => {},
+    resizeBar: () => {},
     captureFailed: () => {},
   };
 

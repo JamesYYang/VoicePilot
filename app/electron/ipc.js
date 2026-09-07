@@ -21,7 +21,7 @@ import { streamPolish } from './llm/polish.js';
 let pendingStudioText = '';
 let pendingHistoryId = null;
 
-export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
+export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar }) {
   /**
    * 主进程 → 渲染进程。
    * 悬浮条可能还没加载完，也可能已被关闭，发送前必须检查。
@@ -127,6 +127,11 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging }) {
   ipcMain.on('vp:mouse-passthrough', (_e, passthrough) => {
     const bar = getBar();
     bar?.setIgnoreMouseEvents(Boolean(passthrough), { forward: true });
+  });
+
+  /** 渲染进程报内容高度，请求调整悬浮条窗口高度（向上生长，有上限）。 */
+  ipcMain.on('vp:bar/resize', (_e, height) => {
+    resizeBar(Number(height));
   });
 
   // ---------------------------------------------------------------- 主应用（Studio）

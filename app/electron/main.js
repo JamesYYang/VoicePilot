@@ -34,6 +34,8 @@ const RENDERER_DIR = resolve(join(ROOT, 'dist', 'renderer'));
 
 // 悬浮条尺寸。PRD §1.2：桌面右下角、半透明、置顶。
 const BAR = { width: 560, height: 148, margin: 24 };
+// 长文本时悬浮条自动长高的上限。避免一句说太长把窗口拉得变形。
+const BAR_MAX_HEIGHT = 420;
 
 let tray = null;
 let bar = null;
@@ -194,6 +196,26 @@ function createBar() {
 }
 
 /**
+ * 按渲染进程报上来的内容高度调整悬浮条窗口高度。
+ *
+ * 只在 [BAR.height, BAR_MAX_HEIGHT] 区间内变，且不超出工作区；保持底边不动
+ * （向上生长），这样悬浮条始终贴着桌面右下角，不会越说越往上漂。
+ */
+function resizeBar(height) {
+  if (!bar || bar.isDestroyed()) return;
+
+  const { height: workH } = screen.getPrimaryDisplay().workArea;
+  const max = Math.min(BAR_MAX_HEIGHT, workH - BAR.margin * 2);
+  const clamped = Math.min(Math.max(Math.round(height), BAR.height), max);
+
+  const b = bar.getBounds();
+  if (Math.abs(b.height - clamped) < 1) return; // 没变化就跳过，避免高频抖动
+
+  const bottom = b.y + b.height; // 底边固定
+  bar.setBounds({ x: b.x, y: bottom - clamped, width: b.width, height: clamped });
+}
+
+/**
  * 加载渲染进程。开发模式可指向 Vite dev server 换取 HMR：
  *   VP_DEV_URL=http://localhost:5173 npm run dev
  */
@@ -318,7 +340,7 @@ app.whenReady().then(async () => {
   // 协议与 IPC 必须先注册：自测窗口也走 app:// 协议，也要用到 vp:copy 等通道。
   // 注册动作本身没有副作用，放在分支之前最省心。
   registerAppProtocol();
-  const machine = registerIpc({ getBar: () => bar, requestQuit, attachDevLogging });
+  const machine = registerIpc({ getBar: () => bar, requestQuit, attachDevLogging, resizeBar });
 
   // 前两个自测都是「不建窗口、跑完就退」，可以在无人值守的机器上跑，
   // 验的也都是主进程的真实路径。

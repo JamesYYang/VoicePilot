@@ -32,6 +32,10 @@ const MAX_INFLIGHT = 8;
  */
 const ERROR_HOLD_MS = 5000;
 
+/** 悬浮条窗口高度的上下限（与 electron/main.js 的 BAR / BAR_MAX_HEIGHT 对应）。 */
+const BAR_MIN_HEIGHT = 148;
+const BAR_MAX_HEIGHT = 420;
+
 type SessionState = 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing';
 
 interface Notice {
@@ -267,6 +271,25 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [draft, committed, snap.state]);
 
+  // 内容变多/变少时，按需请求主进程调整悬浮条窗口高度（向上生长，有上限）。
+  // 用「文本区溢出量」来算：scrollHeight 是内容自然高度，clientHeight 是当前
+  // 可见高度，两者之差就是还缺多少空间。窗口长高后 clientHeight 跟着变大，
+  // 差值归零即收敛；文字删短后差值为负，窗口自动缩回下限。
+  const lastHeightRef = useRef(0);
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    const overflow = el.scrollHeight - el.clientHeight;
+    const target = Math.min(
+      Math.max(window.innerHeight + overflow, BAR_MIN_HEIGHT),
+      BAR_MAX_HEIGHT
+    );
+    const rounded = Math.round(target);
+    if (rounded === lastHeightRef.current) return;
+    lastHeightRef.current = rounded;
+    vp.resizeBar(rounded);
+  }, [draft, committed, snap, error, copied, vp]);
+
   const paragraphs = useMemo(() => {
     // 按 paraBreak 分组，渲染成段落
     const out: string[][] = [[]];
@@ -371,13 +394,15 @@ const ERROR_TEXT: Record<string, string> = {
 
 const styles = {
   bar: {
-    height: '100%',
+    // 用 calc 扣掉上下 margin，避免「height:100% + margin」让底部 16px 被窗口裁掉
+    height: 'calc(100% - 16px)',
     boxSizing: 'border-box' as const,
     margin: 8,
     padding: '12px 16px',
     borderRadius: 12,
-    background: 'rgba(255, 255, 255, 0.95)',
-    border: '1px solid #e5e7eb',
+    background: 'rgba(248, 250, 252, 0.96)', // 近白但不刺眼，slate-50 微冷调
+    border: '1px solid #e2e8f0',
+    boxShadow: '0 2px 16px rgba(15, 23, 42, 0.10)',
     display: 'flex',
     flexDirection: 'column' as const,
     gap: 8,
@@ -388,9 +413,17 @@ const styles = {
     overflow: 'hidden',
   },
   head: { display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },
-  badge: { color: '#1d4ed8', fontSize: 11, letterSpacing: 0.5 },
-  notice: { color: '#d97706', fontSize: 11 },
-  warn: { color: '#d97706', fontSize: 11 },
+  badge: {
+    color: '#1d4ed8',
+    background: '#eff6ff',
+    padding: '1px 8px',
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: 0.5,
+  },
+  notice: { color: '#b45309', fontSize: 11 },
+  warn: { color: '#b45309', fontSize: 11 },
   error: { color: '#dc2626', fontSize: 11, flexShrink: 0 },
   text: {
     flex: 1,
