@@ -19,8 +19,31 @@ import { CaptureEngine } from './audio/capture';
  * 的 sentence_end，分段判据是句间静默 ≥800ms（demo 里实测出来的阈值）。
  */
 
-/** 句间静默超过这个值就另起一段（沿用 demo 实测的判据） */
-const PARA_BREAK_MS = 800;
+/**
+ * 句间静默超过多少才另起一段——**自适应**，不再用固定阈值。
+ *
+ * 固定 800ms 的问题：新闻播报、领导发言这类语速慢的口述，句与句之间的停顿
+ * 本来就很长（1~2s），固定阈值会把整段文字切成碎片。
+ *
+ * 改为「按说话人自己的节奏」判：维护最近若干句的句间静默，取中位数，
+ * 静默超过「中位数 × PARA_BREAK_MULT」才另起一段，且不低于 PARA_BREAK_MIN_MS。
+ * 语速快的人中位数小 → 阈值低、正常分段；语速慢的人中位数大 → 阈值高、
+ * 只有真正的长停顿（换话题）才分段，句间停顿不再误切。
+ */
+const PARA_BREAK_MIN_MS = 1200;
+const PARA_BREAK_MULT = 2.5;
+const GAP_WINDOW = 10;
+
+function median(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function breakThresholdMs(gaps: number[]): number {
+  return Math.max(median(gaps) * PARA_BREAK_MULT, PARA_BREAK_MIN_MS);
+}
 /** 未确认帧数的上限。超了就丢新帧，防止 IPC 队列无界增长（A8） */
 const MAX_INFLIGHT = 8;
 /**
@@ -93,6 +116,8 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   const ackedSeqRef = useRef(0);
   const droppedRef = useRef(0);
   const lastEndRef = useRef(0);
+  /** 最近若干句的句间静默（毫秒），用于自适应分段判据 */
+  const gapsRef = useRef<number[]>([]);
   const historySavedRef = useRef(false);
   const historyIdRef = useRef<number | null>(null);
 
@@ -159,9 +184,16 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     });
     const offPartial = vp.onPartial((p: Partial) => {
       if (p.sentenceEnd) {
-        // 定稿：整句入列，并据句间静默决定是否另起一段
+        // 定稿：整句入列，并据「自适应句间静默阈值」决定是否另起一段
         const gap = p.beginTime !== null && lastEndRef.current ? p.beginTime - lastEndRef.current : 0;
-        setCommitted((prev) => [...prev, { text: p.text, paraBreak: gap >= PARA_BREAK_MS }]);
+        if (gap > 0) {
+          gapsRef.current.push(gap);
+          if (gapsRef.current.length > GAP_WINDOW) gapsRef.current.shift();
+        }
+        setCommitted((prev) => [
+          ...prev,
+          { text: p.text, paraBreak: gap >= breakThresholdMs(gapsRef.current) },
+        ]);
         setDraft('');
       } else {
         setDraft(p.text);
@@ -223,6 +255,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       ackedSeqRef.current = 0;
       droppedRef.current = 0;
       lastEndRef.current = 0;
+      gapsRef.current = [];
       historySavedRef.current = false;
       historyIdRef.current = null;
 
@@ -291,11 +324,13 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   }, [draft, committed, snap, error, copied, vp]);
 
   const paragraphs = useMemo(() => {
-    // 按 paraBreak 分组，渲染成段落
+    // 按 paraBreak 分组，渲染成段落。
+    // paraBreak 语义是「这句之前另起一段」，所以要先开新组、再放入本句 ——
+    // 反过来（先放后开）会把分段点错位移到句尾，换行跑到段末。
     const out: string[][] = [[]];
     for (const c of committed) {
+      if (c.paraBreak && out[out.length - 1].length > 0) out.push([]);
       out[out.length - 1].push(c.text);
-      if (c.paraBreak) out.push([]);
     }
     return out;
   }, [committed]);

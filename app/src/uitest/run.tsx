@@ -177,7 +177,8 @@ export async function runUiTest() {
   check('草稿是灰字（有 draft 节点）', container.querySelector('span[style*="156"]') !== null ||
     textEl?.innerHTML.includes('9ca3af') === true);
 
-  // ---- 5. 定稿 + 分段 ----
+  // ---- 5. 定稿 + 自适应分段 ----
+  // 先连说几句，句间都是 300ms 短停顿（快语速节奏），不该分段
   fire('partial', {
     recvAtMs: Date.now(),
     text: '今天我们要讨论三件事',
@@ -192,17 +193,42 @@ export async function runUiTest() {
     text: '第一件是采集',
     sentenceEnd: true,
     sentenceId: 's2',
-    beginTime: 2200, // 与上句末尾隔 1300ms，超过 800ms 阈值 → 应另起一段
-    endTime: 3100,
+    beginTime: 1200, // 与上句末尾隔 300ms
+    endTime: 2100,
+    words: [],
+  });
+  fire('partial', {
+    recvAtMs: Date.now(),
+    text: '第二件是识别',
+    sentenceEnd: true,
+    sentenceId: 's3',
+    beginTime: 2400, // 隔 300ms
+    endTime: 3300,
     words: [],
   });
   await flush();
   const committedEl = container.querySelector('[data-testid="text"]');
-  check('定稿后两句都在', committedEl?.textContent?.includes('三件事') === true &&
-    committedEl?.textContent?.includes('第一件是采集') === true,
+  check('定稿后多句都在', committedEl?.textContent?.includes('三件事') === true &&
+    committedEl?.textContent?.includes('第一件是采集') === true &&
+    committedEl?.textContent?.includes('第二件是识别') === true,
     JSON.stringify(committedEl?.textContent));
-  // 2200 - 900 = 1300ms 静默 > 800ms 阈值 → 应分段（文本里出现换行）
-  check('句间静默 1300ms 触发分段', committedEl?.textContent?.includes('\n') === true,
+  // 300ms 短停顿不触发分段：固定阈值对慢语速会误切，这里验快语速正常不分段
+  check('短停顿 300ms 不分段', committedEl?.textContent?.includes('\n') === false,
+    JSON.stringify(committedEl?.textContent));
+
+  // 一次明显长于自身节奏的停顿（2000ms）→ 才另起一段
+  fire('partial', {
+    recvAtMs: Date.now(),
+    text: '第三件是润色',
+    sentenceEnd: true,
+    sentenceId: 's4',
+    beginTime: 5300, // 与上句末尾隔 2000ms，远超自身节奏 → 分段
+    endTime: 6200,
+    words: [],
+  });
+  await flush();
+  check('长停顿 2000ms 触发分段，且换行在第三件之前',
+    committedEl?.textContent?.includes('第二件是识别\n第三件是润色') === true,
     JSON.stringify(committedEl?.textContent));
 
   // ---- 6. reviewing + 复制（走真实 IPC，主进程读回剪贴板核对）----
