@@ -12,6 +12,7 @@ export async function runStoreSelftest() {
   const tones = listPresets('tone');
   const okSeed = scenes.length === 4 && tones.length === 4 &&
     scenes.every((p) => p.is_builtin === 1) && tones.every((p) => p.is_builtin === 1);
+  const okDocFirst = scenes[0]?.name === '文档';
 
   // 历史写入 + 列表
   const { id } = saveHistory({ text: '第一段口述', durationMs: 12000 });
@@ -36,7 +37,7 @@ export async function runStoreSelftest() {
   setMeta('first_run_done', 'true');
   const okMeta = getMeta('first_run_done') === 'true';
 
-  const ok = okSeed && okWrite && okUpdate && okAdd && okEdit && okBuiltinKeep && okDel && okMeta;
-  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta}`);
+  const ok = okSeed && okWrite && okUpdate && okAdd && okEdit && okBuiltinKeep && okDel && okMeta && okDocFirst;
+  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 文档首位=${okDocFirst}`);
   return { ok };
 }

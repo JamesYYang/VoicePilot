@@ -10,7 +10,7 @@ import { join } from 'node:path';
  * 省掉原生模块与 electron-rebuild 一整套。三张表：history / presets / meta。
  */
 
-const BUILTIN_SCENES = ['邮件', '即时通讯', '文档', '社媒'];
+const BUILTIN_SCENES = ['文档', '邮件', '即时通讯', '社媒'];
 const BUILTIN_TONES = ['正式', '口语', '简洁', '热情'];
 
 const SCHEMA = `
