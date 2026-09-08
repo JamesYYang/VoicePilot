@@ -104,8 +104,6 @@ interface VoicePilotBridge {
   onPolishError(cb: (p: { message: string }) => void): () => void;
   /** 主进程在窗口已存在时推送新文本，编辑器据此刷新 */
   onStudioRefresh(cb: (p: { text: string }) => void): () => void;
-  /** 记录首次引导选择（职业），返回是否成功 */
-  saveOnboarding(payload: { profession: string }): Promise<boolean>;
   /** 关闭首次引导窗口 */
   closeOnboarding(): Promise<boolean>;
   /** 保存用户输入的 API Key + 工作空间 ID（主进程加密落盘） */

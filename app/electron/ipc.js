@@ -223,14 +223,6 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar }
     return true;
   });
 
-  /** 记录首次引导选择：职业 + 场景默认值 + 首次标志。 */
-  ipcMain.handle('vp:onboarding/save', (_e, { profession }) => {
-    setMeta('profession', profession);
-    setMeta('default_scene', profession === 'product_rd' ? '文档' : '邮件');
-    setMeta('first_run_done', 'true');
-    return true;
-  });
-
   /** 关闭引导窗。 */
   ipcMain.handle('vp:onboarding/close', () => {
     getOnboardingWindow()?.close();
