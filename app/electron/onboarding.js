@@ -1,6 +1,7 @@
 import { BrowserWindow } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setMeta } from './store.js';
 
 /**
  * 首次使用引导窗口（PRD §4.0 / F8）。只问一个问题：工作领域。
@@ -34,6 +35,7 @@ export function createOnboardingWindow({ attachDevLogging }) {
   attachDevLogging(win);
   win.loadURL('app://voicepilot/index.html#onboarding');
   win.on('closed', () => {
+    setMeta('first_run_done', 'true');
     win = null;
   });
   return win;
