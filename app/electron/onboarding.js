@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { setMeta } from './store.js';
 
 /**
- * 首次使用引导窗口（PRD §4.0 / F8）。只问一个问题：工作领域。
+ * 首次使用欢迎窗口（PRD §4.0 / F8）。只介绍快捷键与权限，不提问。
  * 独立小窗，复用 createDiagWindow 的二级窗口模式，加载 #onboarding 路由。
  */
 
