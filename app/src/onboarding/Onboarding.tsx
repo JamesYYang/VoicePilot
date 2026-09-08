@@ -14,7 +14,7 @@ export default function Onboarding({ bridge }: { bridge?: Window['voicepilot'] }
 
   return (
     <div style={styles.page}>
-      <h1 style={styles.title}>欢迎使用 VoicePilot 闻字</h1>
+      <h1 style={styles.title}>欢迎使用 <span style={styles.brand}>VoicePilot 闻字</span></h1>
       <p style={styles.line}>
         按 <b style={styles.key}>{shortcut}</b> 开始语音输入，说完自动生成文字，可一键复制或润色。
       </p>
@@ -29,6 +29,7 @@ export default function Onboarding({ bridge }: { bridge?: Window['voicepilot'] }
 const styles = {
   page: { height: '100vh', boxSizing: 'border-box', padding: 24, display: 'flex', flexDirection: 'column', gap: 14, background: '#ffffff', color: '#1f2937', fontSize: 13 },
   title: { margin: 0, fontSize: 16, fontWeight: 600 },
+  brand: { color: '#2563eb', fontWeight: 700 },
   line: { margin: 0, lineHeight: 1.6 },
   key: { fontFamily: 'monospace', background: '#f3f4f6', padding: '2px 6px', borderRadius: 4 },
   hint: { margin: 0, color: '#6b7280', fontSize: 12, lineHeight: 1.6 },
