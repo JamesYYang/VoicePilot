@@ -184,6 +184,8 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar }
    * 结果走三个事件：vp:polish/delta（增量）/ done（收尾）/ error（失败）。
    */
   ipcMain.handle('vp:polish/start', async (_e, { text, scene, tone }) => {
+    // last-used 默认场景：记住本次润色用的场景，下次打开默认选中。独立 try 避免影响润色本身。
+    try { setMeta('default_scene', scene?.name ?? ''); } catch {}
     const win = getStudioWindow();
     const emit = (channel, payload) => win?.webContents.send(channel, payload);
 
