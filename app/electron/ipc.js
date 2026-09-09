@@ -1,4 +1,4 @@
-import { app, clipboard, ipcMain, shell } from 'electron';
+import { app, clipboard, ipcMain, shell, systemPreferences } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
@@ -243,6 +243,30 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar }
   /** 关闭「设置 API Key」窗口。 */
   ipcMain.handle('vp:key/close', () => {
     getKeyEntryWindow()?.close();
+    return true;
+  });
+
+  // ---------------------------------------------------------------- 权限（F12）
+
+  /** macOS 辅助功能授权状态。非 macOS 返回 null（表示「不适用」）。 */
+  ipcMain.handle('vp:permission/status', () => ({
+    accessibility:
+      process.platform === 'darwin'
+        ? systemPreferences.isTrustedAccessibilityClient(false)
+        : null,
+  }));
+
+  /**
+   * 打开系统设置 → 辅助功能页（macOS 深链）。非 macOS 空操作。
+   * URL 用经典写法；macOS 13+ 系统设置改版后若跳转失效，换成
+   * 'x-apple.systempreferences:com.apple.settings.privacy?Privacy_Accessibility'
+   * （真机验证见 Task 3）。
+   */
+  ipcMain.handle('vp:permission/open-settings', async () => {
+    if (process.platform !== 'darwin') return false;
+    await shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+    );
     return true;
   });
 

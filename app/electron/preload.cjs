@@ -246,4 +246,16 @@ contextBridge.exposeInMainWorld('voicepilot', {
   closeKeyEntry() {
     return ipcRenderer.invoke('vp:key/close');
   },
+
+  // ---------------------------------------------------------------- 权限（F12）
+
+  /** macOS 辅助功能授权状态。非 macOS 返回 {accessibility: null}。 */
+  getPermissionStatus() {
+    return ipcRenderer.invoke('vp:permission/status');
+  },
+
+  /** 打开系统设置 → 辅助功能页（macOS 深链）。 */
+  openAccessibilitySettings() {
+    return ipcRenderer.invoke('vp:permission/open-settings');
+  },
 });

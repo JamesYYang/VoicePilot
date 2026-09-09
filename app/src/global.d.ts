@@ -110,6 +110,11 @@ interface VoicePilotBridge {
   saveKey(payload: { apiKey: string; workspaceId: string }): Promise<boolean>;
   /** 关闭「设置 API Key」窗口 */
   closeKeyEntry(): Promise<boolean>;
+  // —— 权限（F12）——
+  /** macOS 辅助功能授权状态；非 macOS 为 null（「不适用」） */
+  getPermissionStatus(): Promise<{ accessibility: boolean | null }>;
+  /** 打开系统设置 → 辅助功能页（macOS 深链） */
+  openAccessibilitySettings(): Promise<boolean>;
 }
 
 interface Window {
