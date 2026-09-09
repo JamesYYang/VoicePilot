@@ -8,9 +8,8 @@ import SettingsView from './SettingsView';
  * 主应用（Studio）外壳 —— 润色工作区的骨架（Task 3）。
  *
  * 布局分两块：左侧 48px 图标栏 + 右侧内容区。
- * 图标栏只有三个入口：润色 / 历史 / 设置。其中「润色」是主工作区，对应
- * Task 4 的 PolishView（当前先用占位 div 顶着）；「历史」「设置」点了只显示
- * 「待实现」占位，后续任务再填。
+ * 图标栏只有三个入口：润色 / 历史 / 设置，分别渲染
+ * PolishView / HistoryView / SettingsView。
  *
  * 亮色样式（spec §2）：白底、深色文字，与悬浮条的暗色浮层区分开。
  */
@@ -89,9 +88,5 @@ const styles = {
     minWidth: 0,
     display: 'flex',
     flexDirection: 'column',
-  },
-  placeholder: {
-    margin: 'auto',
-    color: '#9ca3af',
   },
 } satisfies Record<string, CSSProperties | ((active: boolean) => CSSProperties)>;

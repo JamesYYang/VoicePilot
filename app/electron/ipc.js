@@ -264,10 +264,15 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar }
    */
   ipcMain.handle('vp:permission/open-settings', async () => {
     if (process.platform !== 'darwin') return false;
-    await shell.openExternal(
-      'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
-    );
-    return true;
+    try {
+      await shell.openExternal(
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+      );
+      return true;
+    } catch {
+      // 深链失败（极少见）：返回 false，用户可手动走文字步骤
+      return false;
+    }
   });
 
   return machine;

@@ -30,7 +30,8 @@ export default function SettingsView({ bridge }: { bridge?: Window['voicepilot']
     };
   }, [vp]);
 
-  // accessibility === null 表示「本平台不适用」（Windows）
+  // status === null 表示「加载中」；status.accessibility === null 表示「本平台不适用」（Windows）
+  const loaded = status != null;
   const applicable = status?.accessibility != null;
   const granted = status?.accessibility === true;
 
@@ -38,7 +39,7 @@ export default function SettingsView({ bridge }: { bridge?: Window['voicepilot']
     <div style={styles.page}>
       <h2 style={styles.h2}>权限</h2>
 
-      {!applicable ? (
+      {!loaded ? null : !applicable ? (
         <p style={styles.plain}>本平台无需额外权限。</p>
       ) : (
         <div style={styles.block}>
