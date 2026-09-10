@@ -41,21 +41,19 @@ export default function SettingsView({ bridge }: { bridge?: Window['voicepilot']
 
   return (
     <div style={styles.page}>
-      <div style={styles.block}>
-        <span style={styles.label}>{t('settings.language')}</span>
-        <select
-          data-testid="settings-lang"
-          style={styles.select}
-          value={locale}
-          onChange={(e) => void vp.setLanguage(e.target.value as Locale)}
-        >
-          <option value="zh-CN">简体中文</option>
-          <option value="zh-TW">繁體中文</option>
-          <option value="en-US">English</option>
-        </select>
-      </div>
+      <h2 style={styles.h2}>{t('settings.language')}</h2>
+      <select
+        data-testid="settings-lang"
+        style={styles.select}
+        value={locale}
+        onChange={(e) => void vp.setLanguage(e.target.value as Locale)}
+      >
+        <option value="zh-CN">简体中文</option>
+        <option value="zh-TW">繁體中文</option>
+        <option value="en-US">English</option>
+      </select>
 
-      <h2 style={styles.h2}>{t('settings.permissions')}</h2>
+      <h2 style={{ ...styles.h2, marginTop: 16 }}>{t('settings.permissions')}</h2>
 
       {!loaded ? null : !applicable ? (
         <p style={styles.plain}>{t('settings.noPermNeeded')}</p>
