@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import {
   openStore, openStoreWithDb, saveHistory, listHistory, getHistory, updateHistoryPolish,
-  listPresets, savePreset, deletePreset, getMeta, setMeta, migrateDefaultScene,
+  deleteHistory, listPresets, savePreset, deletePreset, getMeta, setMeta, migrateDefaultScene,
 } from '../store.js';
 
 export async function runStoreSelftest() {
@@ -27,6 +27,11 @@ export async function runStoreSelftest() {
   updateHistoryPolish(id, { polished: '润色版', scene: '邮件', tone: '正式' });
   const got = getHistory(id);
   const okUpdate = got !== null && got.polished === '润色版' && got.scene === '邮件' && got.tone === '正式';
+
+  // 历史删除
+  const okDelHistory = deleteHistory(id) === true;
+  const okDelGone = getHistory(id) === null;
+  const okDelMissing = deleteHistory(999999) === false;
 
   // 预设增 / 改 / 删（lang 随自定义预设写入并回读）
   const { id: pid } = savePreset({ kind: 'scene', name: '周报', description: '每周汇报', lang: 'zh-CN' });
@@ -97,9 +102,9 @@ export async function runStoreSelftest() {
   const okMigrateBackfillIdem =
     again?.name_zh_cn === '文档' && again?.name_zh_tw === '文檔' && again?.name_en === 'Document';
 
-  const ok = okSeed && okWrite && okUpdate && okAdd && okEdit && okBuiltinKeep && okDel && okMeta && okTrilingual &&
+  const ok = okSeed && okWrite && okUpdate && okDelHistory && okDelGone && okDelMissing && okAdd && okEdit && okBuiltinKeep && okDel && okMeta && okTrilingual &&
     okMigrateMiss && okMigrateHit && okMigrateIdem &&
     okMigrateBackfill && okMigrateList && okMigrateBackfillIdem;
-  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem}`);
+  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem}`);
   return { ok };
 }

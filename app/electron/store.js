@@ -161,6 +161,13 @@ export function getHistory(id) {
     .get(id) ?? null;
 }
 
+/** 删除一条历史。返回是否真的删掉了（id 不存在时 false）。 */
+export function deleteHistory(id) {
+  openStore();
+  const r = db.prepare('DELETE FROM history WHERE id = ?').run(id);
+  return r.changes > 0;
+}
+
 export function updateHistoryPolish(id, { polished, scene, tone }) {
   openStore();
   db.prepare('UPDATE history SET polished = ?, scene = ?, tone = ? WHERE id = ?')

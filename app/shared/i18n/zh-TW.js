@@ -39,6 +39,7 @@ export const zhTW = {
   'history.copied': '已複製',
   'history.selectHint': '選取一則歷史查看全文',
   'history.seconds': '秒',
+  'history.delete': '刪除',
   'preset.manage': '管理預設',
   'preset.edit': '編輯',
   'preset.builtin': '內建',

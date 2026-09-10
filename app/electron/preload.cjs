@@ -202,6 +202,11 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:history/get', id);
   },
 
+  /** 删除一条历史。返回是否真的删掉了。 */
+  historyDelete(id) {
+    return ipcRenderer.invoke('vp:history/delete', id);
+  },
+
   /** 采用润色结果，回写历史。 */
   adoptPolish(payload) {
     return ipcRenderer.invoke('vp:polish/adopt', payload);

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import PolishView from './PolishView';
 import HistoryView from './HistoryView';
 import SettingsView from './SettingsView';
@@ -16,6 +16,27 @@ import { useT } from '../i18n';
  */
 
 type View = 'polish' | 'history' | 'settings';
+
+/** 左侧菜单图标（16 视口、1.5 stroke、currentColor，随文字变色）。 */
+const ICONS: Record<View, ReactNode> = {
+  polish: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 2l1.2 3.5 3.5 1.2-3.5 1.2L8 11.4 6.8 7.9 3.3 6.7 6.8 5.5z" />
+    </svg>
+  ),
+  history: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 5v3l2 1.5" />
+    </svg>
+  ),
+  settings: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="2" />
+      <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" />
+    </svg>
+  ),
+};
 
 export default function Studio({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
   const t = useT();
@@ -36,7 +57,8 @@ export default function Studio({ bridge }: { bridge?: Window['voicepilot'] } = {
             style={styles.railButton(view === key)}
             onClick={() => setView(key)}
           >
-            {label}
+            <span style={styles.railIcon}>{ICONS[key]}</span>
+            <span>{label}</span>
           </button>
         ))}
       </aside>
@@ -76,6 +98,10 @@ const styles = {
     borderRight: '1px solid #e5e7eb',
   },
   railButton: (active: boolean) => ({
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     padding: '8px 0',
     whiteSpace: 'nowrap',
     borderRadius: 6,
@@ -87,6 +113,7 @@ const styles = {
     cursor: 'pointer',
     boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
   }),
+  railIcon: { display: 'flex', flexShrink: 0 },
   content: {
     flex: 1,
     minWidth: 0,

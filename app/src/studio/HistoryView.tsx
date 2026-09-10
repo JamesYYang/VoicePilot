@@ -22,6 +22,7 @@ export default function HistoryView({ bridge }: { bridge?: Window['voicepilot'] 
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [selected, setSelected] = useState<HistoryRow | null>(null);
   const [copied, setCopied] = useState(false);
+  const [hoverId, setHoverId] = useState<number | null>(null);
 
   useEffect(() => {
     void vp.historyList().then(setRows);
@@ -32,22 +33,49 @@ export default function HistoryView({ bridge }: { bridge?: Window['voicepilot'] 
     setCopied(false);
   };
 
+  const del = async (id: number) => {
+    const ok = await vp.historyDelete(id);
+    if (!ok) return;
+    setRows((prev) => prev.filter((r) => r.id !== id));
+    setSelected((cur) => (cur?.id === id ? null : cur));
+    setCopied(false);
+  };
+
   return (
     <div style={styles.page}>
       <aside style={styles.list}>
         {rows.length === 0 && <div style={styles.empty}>{t('history.empty')}</div>}
         {rows.map((r) => (
-          <button key={r.id} style={styles.item(selected?.id === r.id)} onClick={() => open(r)}>
-            <div style={styles.itemTime}>{fmtTime(r.created_at)}</div>
-            <div style={styles.itemText}>{r.text.slice(0, 40)}</div>
-            {(r.scene || r.tone) && (
-              <div style={styles.tags}>
-                {r.scene && <span style={styles.tag}>{r.scene}</span>}
-                {r.tone && <span style={styles.tag}>{r.tone}</span>}
-              </div>
+          <div
+            key={r.id}
+            style={styles.item(selected?.id === r.id)}
+            onClick={() => open(r)}
+            onMouseEnter={() => setHoverId(r.id)}
+            onMouseLeave={() => setHoverId((cur) => (cur === r.id ? null : cur))}
+          >
+            <div style={styles.itemMain}>
+              <div style={styles.itemTime}>{fmtTime(r.created_at)}</div>
+              <div style={styles.itemText}>{r.text.slice(0, 40)}</div>
+              {(r.scene || r.tone) && (
+                <div style={styles.tags}>
+                  {r.scene && <span style={styles.tag}>{r.scene}</span>}
+                  {r.tone && <span style={styles.tag}>{r.tone}</span>}
+                </div>
+              )}
+              {r.polished && <span style={styles.polishedTag}>{t('history.polished')}</span>}
+            </div>
+            {hoverId === r.id && (
+              <button
+                style={styles.deleteBtn}
+                aria-label={t('history.delete')}
+                onClick={(e) => { e.stopPropagation(); void del(r.id); }}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2.5 4.5h11M6.5 4.5V3.2a1 1 0 011-1h1a1 1 0 011 1v1.3M4.2 4.5l.7 8.3a1 1 0 001 .9h4.2a1 1 0 001-.9l.7-8.3M6.5 7.5v3M9.5 7.5v3" />
+                </svg>
+              </button>
             )}
-            {r.polished && <span style={styles.polishedTag}>{t('history.polished')}</span>}
-          </button>
+          </div>
         ))}
       </aside>
 
@@ -96,10 +124,18 @@ const styles = {
   list: { width: 240, flexShrink: 0, overflowY: 'auto', borderRight: '1px solid #e5e7eb', padding: 8, boxSizing: 'border-box' },
   empty: { margin: 'auto', color: '#9ca3af', padding: 16 },
   item: (active: boolean) => ({
-    display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', marginBottom: 4,
-    borderRadius: 6, border: 'none', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left',
+    padding: '8px 10px', marginBottom: 4, borderRadius: 6, cursor: 'pointer',
+    boxSizing: 'border-box',
     background: active ? '#eff6ff' : 'transparent', color: '#1f2937', fontSize: 12,
   }),
+  itemMain: { flex: 1, minWidth: 0 },
+  deleteBtn: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, padding: 4, borderRadius: 4,
+    border: 'none', background: 'transparent',
+    color: '#dc2626', cursor: 'pointer',
+  },
   itemTime: { color: '#9ca3af', fontSize: 11 },
   itemText: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   tags: { display: 'flex', gap: 4, marginTop: 4 },

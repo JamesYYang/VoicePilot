@@ -39,6 +39,7 @@ export const enUS = {
   'history.copied': 'Copied',
   'history.selectHint': 'Select a record to view',
   'history.seconds': 's',
+  'history.delete': 'Delete',
   'preset.manage': 'Manage presets',
   'preset.edit': 'Edit',
   'preset.builtin': 'Built-in',

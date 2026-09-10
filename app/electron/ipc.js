@@ -8,7 +8,7 @@ import { createStudioWindow, getStudioWindow } from './studio.js';
 import { getOnboardingWindow } from './onboarding.js';
 import { getKeyEntryWindow } from './key-entry.js';
 import { saveCredentials } from './asr/config.js';
-import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish } from './store.js';
+import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, deleteHistory } from './store.js';
 import { streamPolish } from './llm/polish.js';
 
 /**
@@ -232,6 +232,9 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
 
   /** 历史详情。 */
   ipcMain.handle('vp:history/get', (_e, id) => getHistory(Number(id)));
+
+  /** 删除一条历史。返回是否真的删掉了。 */
+  ipcMain.handle('vp:history/delete', (_e, id) => deleteHistory(Number(id)));
 
   /** 采用润色结果：把润色文本 + 场景/语气回写进本次会话的历史条目。 */
   ipcMain.handle('vp:polish/adopt', (_e, { polished, scene, tone }) => {

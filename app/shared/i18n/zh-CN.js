@@ -43,6 +43,7 @@ export const zhCN = {
   'history.copied': '已复制',
   'history.selectHint': '选中一条历史查看全文',
   'history.seconds': '秒',
+  'history.delete': '删除',
   // 预设管理
   'preset.manage': '管理预设',
   'preset.edit': '编辑',
