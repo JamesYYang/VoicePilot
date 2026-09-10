@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import PolishView from './PolishView';
 import HistoryView from './HistoryView';
@@ -39,8 +39,14 @@ const ICONS: Record<View, ReactNode> = {
 };
 
 export default function Studio({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
+  const vp = bridge ?? window.voicepilot;
   const t = useT();
   const [view, setView] = useState<View>('polish');
+
+  // 悬浮条/历史点「润色」时，主应用已存在则只 focus + 推 refresh 事件，不重载窗口。
+  // 若当前停在历史/设置视图，PolishView 没挂载、收不到 refresh——由这里切回润色视图，
+  // PolishView 挂载时 syncStudio 自会拉到待润色文本。
+  useEffect(() => vp.onStudioRefresh(() => setView('polish')), [vp]);
 
   const NAV: { key: View; label: string }[] = [
     { key: 'polish', label: t('studio.polish') },

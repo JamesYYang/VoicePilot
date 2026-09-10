@@ -348,16 +348,16 @@ export async function runUiTest() {
   const polishCall: { payload: { text: string; scene: Preset; tone: Preset } | null } = { payload: null };
   const adoptCall: { payload: { polished: string; scene: string; tone: string } | null } = { payload: null };
   // 给 Studio 注入假 bridge（与 App 同款模式），不动只读的 window.voicepilot。
-  // 用对象属性兜住刷新监听器：TS 会把 `let x = null` 收窄成 null，
-  // 属性访问则不会被这样收窄。
-  const studioRefresh: { cb: ((p: { text: string }) => void) | null } = { cb: null };
+  // onStudioRefresh 必须多播：Studio 与 PolishView 都会订阅（真实 preload 的
+  // ipcRenderer.on 是多播），单播 mock 会互相覆盖。
+  const studioRefreshCbs: ((p: { text: string }) => void)[] = [];
   // 润色流式事件监听器，供测试按真实签名 fire 载荷（与 studioRefresh 同款模式）
   const studioDelta: { cb: ((p: { text: string }) => void) | null } = { cb: null };
   const studioDone: { cb: (() => void) | null } = { cb: null };
   const studioError: { cb: ((p: { message: string }) => void) | null } = { cb: null };
   const studioBridge = {
     ...real,
-    onStudioRefresh: (cb: (p: { text: string }) => void) => { studioRefresh.cb = cb; return () => {}; },
+    onStudioRefresh: (cb: (p: { text: string }) => void) => { studioRefreshCbs.push(cb); return () => {}; },
     syncStudio: () =>
       Promise.resolve({
         text: '测试原文',
@@ -416,7 +416,7 @@ export async function runUiTest() {
   // ---- 10. Studio 已存在时刷新文本（重复口述→再点润色）----
   // 主进程在窗口已存在时只 focus 不重载，改为推 vp:studio/refresh 事件，
   // 编辑器必须据此更新，否则用户第二次口述后看到的仍是第一次的文本。
-  studioRefresh.cb?.({ text: '第二次口述的新文本' });
+  for (const cb of studioRefreshCbs) cb({ text: '第二次口述的新文本' });
   await flush();
   check(
     'Studio 编辑器随 studioRefresh 刷新为新文本',
