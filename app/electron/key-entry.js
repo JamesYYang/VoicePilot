@@ -1,6 +1,8 @@
 import { BrowserWindow } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { t } from '../shared/i18n/index.js';
+import { getCurrentLocale } from './locale.js';
 
 /**
  * 「设置 API Key」窗口。
@@ -23,7 +25,7 @@ export function createKeyEntryWindow({ attachDevLogging }) {
     width: 440,
     height: 380,
     resizable: false,
-    title: '设置 API Key — VoicePilot 闻字',
+    title: t(getCurrentLocale(), 'window.keyEntry'),
     backgroundColor: '#ffffff',
     icon: join(HERE, '..', 'build', 'voicepilot-icon-256.png'),
     autoHideMenuBar: true,

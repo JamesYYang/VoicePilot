@@ -17,6 +17,8 @@ import { createOnboardingWindow } from './onboarding.js';
 import { createKeyEntryWindow } from './key-entry.js';
 import { hasCredentials } from './asr/config.js';
 import { getMeta } from './store.js';
+import { t } from '../shared/i18n/index.js';
+import { getCurrentLocale } from './locale.js';
 
 /**
  * VoicePilot 主进程 —— 应用外壳。
@@ -247,7 +249,7 @@ function createDiagWindow() {
   diag = new BrowserWindow({
     width: 920,
     height: 780,
-    title: 'VoicePilot 采集诊断',
+    title: t(getCurrentLocale(), 'window.diag'),
     icon: join(HERE, '..', 'build', 'voicepilot-icon-256.png'),
     autoHideMenuBar: true,
     webPreferences: {
@@ -293,27 +295,40 @@ function createUiTestWindow() {
 
 // ---------------------------------------------------------------- 托盘与快捷键
 
+/**
+ * 用当前 locale 重建托盘的 tooltip 与菜单。
+ *
+ * 菜单模板集中在这里，方便语言切换时整体刷新（Task 2 的 setCurrentLocale
+ * 通过 registerIpc 传进来的 rebuildTray 回调触发）。工具提示与菜单 label
+ * 都走 t()，只有图标留在 createTray 里（图标不随语言变）。
+ */
+function rebuildTray() {
+  if (!tray || tray.isDestroyed()) return;
+  const locale = getCurrentLocale();
+  tray.setToolTip(t(locale, 'productName'));
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: t(locale, 'tray.openMain'), click: () => createStudioWindow({ attachDevLogging }) },
+      { type: 'separator' },
+      // 必须用 showInactive()：show() 会激活窗口，抢走目标应用的焦点，
+      // 直接违反 A2「全过程不抢焦点」。
+      { label: t(locale, 'tray.showBar'), click: () => bar?.showInactive() },
+      { label: t(locale, 'tray.hideBar'), click: () => bar?.hide() },
+      { type: 'separator' },
+      { label: t(locale, 'tray.diag'), click: () => createDiagWindow() },
+      { type: 'separator' },
+      { label: t(locale, 'tray.setKey'), click: () => createKeyEntryWindow({ attachDevLogging }) },
+      { type: 'separator' },
+      { label: t(locale, 'tray.quit'), click: () => requestQuit() },
+    ])
+  );
+}
+
 function createTray() {
   // Windows 托盘吃 .ico（多尺寸内嵌，会按 DPI 自动挑）；macOS 等拿到 Mac 后再单独做 template 图。
   const trayIcon = nativeImage.createFromPath(join(HERE, '..', 'build', 'voicepilot-icon.ico'));
   tray = new Tray(trayIcon.isEmpty() ? nativeImage.createEmpty() : trayIcon);
-  tray.setToolTip('VoicePilot 闻字');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: '打开主应用', click: () => createStudioWindow({ attachDevLogging }) },
-      { type: 'separator' },
-      // 必须用 showInactive()：show() 会激活窗口，抢走目标应用的焦点，
-      // 直接违反 A2「全过程不抢焦点」。
-      { label: '显示悬浮条', click: () => bar?.showInactive() },
-      { label: '隐藏悬浮条', click: () => bar?.hide() },
-      { type: 'separator' },
-      { label: '采集诊断（M1）', click: () => createDiagWindow() },
-      { type: 'separator' },
-      { label: '设置 API Key', click: () => createKeyEntryWindow({ attachDevLogging }) },
-      { type: 'separator' },
-      { label: '退出', click: () => requestQuit() },
-    ])
-  );
+  rebuildTray();
 }
 
 function registerShortcuts(machine) {
@@ -344,7 +359,7 @@ app.whenReady().then(async () => {
   // 协议与 IPC 必须先注册：自测窗口也走 app:// 协议，也要用到 vp:copy 等通道。
   // 注册动作本身没有副作用，放在分支之前最省心。
   registerAppProtocol();
-  const machine = registerIpc({ getBar: () => bar, requestQuit, attachDevLogging, resizeBar, rebuildTray: () => {} });
+  const machine = registerIpc({ getBar: () => bar, requestQuit, attachDevLogging, resizeBar, rebuildTray });
 
   // 前两个自测都是「不建窗口、跑完就退」，可以在无人值守的机器上跑，
   // 验的也都是主进程的真实路径。

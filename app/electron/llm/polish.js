@@ -3,13 +3,18 @@ import { buildPolishMessages } from './prompt.js';
 
 const MODEL = 'deepseek-v4-pro-0813';
 
+/** 文本含 CJK 汉字 → 'zh'，否则 'en'。用于决定润色输出语言指令。 */
+function detectLang(text) {
+  return /[\u4e00-\u9fff]/.test(text) ? 'zh' : 'en';
+}
+
 /**
  * 流式润色。delta 经 onDelta 逐块交付。
  * 只取 content，reasoning_content（思维链）一律丢弃。
  */
 export async function streamPolish({ text, scene, tone, onDelta, onDone, onError }) {
   const { apiKey, workspaceId } = loadCredentials();
-  const { system, user } = buildPolishMessages(text, scene, tone);
+  const { system, user } = buildPolishMessages(text, scene, tone, detectLang(text));
 
   const res = await fetch(
     `https://${workspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions`,

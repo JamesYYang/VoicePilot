@@ -2,6 +2,8 @@ import { BrowserWindow } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setMeta } from './store.js';
+import { t } from '../shared/i18n/index.js';
+import { getCurrentLocale } from './locale.js';
 
 /**
  * 首次使用欢迎窗口（PRD §4.0 / F8）。只介绍快捷键与权限，不提问。
@@ -21,7 +23,7 @@ export function createOnboardingWindow({ attachDevLogging }) {
     width: 420,
     height: 320,
     resizable: false,
-    title: '欢迎使用 VoicePilot 闻字',
+    title: t(getCurrentLocale(), 'window.onboarding'),
     backgroundColor: '#ffffff',
     icon: join(HERE, '..', 'build', 'voicepilot-icon-256.png'),
     autoHideMenuBar: true,

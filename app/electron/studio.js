@@ -1,6 +1,8 @@
 import { BrowserWindow } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { t } from '../shared/i18n/index.js';
+import { getCurrentLocale } from './locale.js';
 
 /**
  * 主应用（Studio）窗口 —— 润色工作区的宿主。
@@ -26,7 +28,7 @@ export function createStudioWindow({ attachDevLogging }) {
     height: 700,
     minWidth: 720,
     minHeight: 480,
-    title: 'VoicePilot 主应用',
+    title: t(getCurrentLocale(), 'window.studio'),
     backgroundColor: '#ffffff', // 亮色（spec §2）
     icon: join(HERE, '..', 'build', 'voicepilot-icon-256.png'),
     autoHideMenuBar: true,

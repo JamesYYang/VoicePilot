@@ -2,6 +2,8 @@ import { loadCredentials } from '../asr/config.js';
 import { AsrSession } from '../asr/session.js';
 import { AudioQueue } from './audio-queue.js';
 import { LatencyMetrics, formatSummary } from '../telemetry/metrics.js';
+import { t } from '../../shared/i18n/index.js';
+import { getCurrentLocale } from '../locale.js';
 
 /**
  * 听写会话状态机（PRD §4.1）。跑在主进程，是唯一的状态源；渲染进程只负责显示。
@@ -234,7 +236,7 @@ export class SessionMachine {
     if (this.#state === 'idle' || this.#state === 'draining' || this.#state === 'reviewing') return;
 
     if (e.kind === 'throttling') {
-      this.#scheduleRetry('throttling', e.message || '服务繁忙');
+      this.#scheduleRetry('throttling', e.message || t(getCurrentLocale(), 'machine.busy'));
       return;
     }
 
@@ -246,14 +248,19 @@ export class SessionMachine {
   #onSessionClosed(e) {
     if (this.#state === 'idle' || this.#state === 'draining' || this.#state === 'reviewing') return;
     // 非我们主动关闭的连接断开：断网，或被服务端踢掉（限流时常见）
-    this.#scheduleRetry(e.kind, e.kind === 'throttling' ? '服务繁忙' : '连接中断');
+    this.#scheduleRetry(
+      e.kind,
+      e.kind === 'throttling'
+        ? t(getCurrentLocale(), 'machine.busy')
+        : t(getCurrentLocale(), 'machine.disconnected')
+    );
   }
 
   #scheduleRetry(kind, message) {
     if (this.#attempt >= this.maxAttempts) {
       this.#emit('vp:error', {
         kind,
-        message: `${message}，已重试 ${this.#attempt} 次仍未成功`,
+        message: t(getCurrentLocale(), 'machine.retryExhausted', { message, attempt: this.#attempt }),
         preserveText: true,
       });
       this.#failToReviewing();
