@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useT, useLocale } from '../i18n';
+import type { Locale } from '../../shared/i18n/index.js';
 
 /**
- * 设置页（F12）—— 目前只有「权限」区块：macOS 辅助功能授权状态 + 分步引导。
+ * 设置页（F12）—— 语言选择器 + 「权限」区块（macOS 辅助功能授权状态 + 分步引导）。
  * 被动显示：用户遇到快捷键不生效时主动来看，不做弹窗、不做智能触发。
  */
 
@@ -10,6 +12,8 @@ type PermStatus = { accessibility: boolean | null };
 
 export default function SettingsView({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
   const vp = bridge ?? window.voicepilot;
+  const t = useT();
+  const locale = useLocale();
   const [status, setStatus] = useState<PermStatus | null>(null);
 
   useEffect(() => {
@@ -37,27 +41,41 @@ export default function SettingsView({ bridge }: { bridge?: Window['voicepilot']
 
   return (
     <div style={styles.page}>
-      <h2 style={styles.h2}>权限</h2>
+      <div style={styles.block}>
+        <span style={styles.label}>{t('settings.language')}</span>
+        <select
+          data-testid="settings-lang"
+          style={styles.select}
+          value={locale}
+          onChange={(e) => void vp.setLanguage(e.target.value as Locale)}
+        >
+          <option value="zh-CN">简体中文</option>
+          <option value="zh-TW">繁體中文</option>
+          <option value="en-US">English</option>
+        </select>
+      </div>
+
+      <h2 style={styles.h2}>{t('settings.permissions')}</h2>
 
       {!loaded ? null : !applicable ? (
-        <p style={styles.plain}>本平台无需额外权限。</p>
+        <p style={styles.plain}>{t('settings.noPermNeeded')}</p>
       ) : (
         <div style={styles.block}>
           <div style={styles.statusRow}>
-            <span style={styles.label}>辅助功能（全局快捷键）</span>
+            <span style={styles.label}>{t('settings.accessibility')}</span>
             <span style={{ ...styles.status, color: granted ? '#16a34a' : '#dc2626' }}>
-              {granted ? '已授权 ✓' : '未授权 ✗'}
+              {granted ? t('settings.granted') : t('settings.denied')}
             </span>
           </div>
           <ol style={styles.steps}>
-            <li>打开「系统设置」</li>
-            <li>进入「隐私与安全性」</li>
+            <li>{t('settings.step1')}</li>
+            <li>{t('settings.step2')}</li>
             <li>
-              点「辅助功能」，勾选 <b>VoicePilot 闻字</b>
+              {t('settings.step3Prefix')} <b>{t('productName')}</b>
             </li>
           </ol>
           <button style={styles.button} onClick={() => void vp.openAccessibilitySettings()}>
-            打开系统设置
+            {t('settings.openSettings')}
           </button>
         </div>
       )}
@@ -70,6 +88,16 @@ const styles = {
   h2: { margin: '0 0 16px', fontSize: 15, fontWeight: 600, color: '#111827' },
   plain: { margin: 0, color: '#6b7280' },
   block: { display: 'flex', flexDirection: 'column', gap: 12 },
+  select: {
+    alignSelf: 'flex-start',
+    padding: '4px 8px',
+    borderRadius: 6,
+    border: '1px solid #d1d5db',
+    background: '#ffffff',
+    color: '#111827',
+    fontSize: 12,
+    outline: 'none',
+  },
   statusRow: { display: 'flex', alignItems: 'center', gap: 12 },
   label: { color: '#374151' },
   status: { fontWeight: 600 },

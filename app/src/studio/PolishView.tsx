@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import PresetManager from './PresetManager';
+import { useT } from '../i18n';
 
 /**
  * 润色工作区（Task 4/5）。
@@ -23,6 +24,7 @@ interface StudioSync {
 
 export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
   const vp = bridge ?? window.voicepilot;
+  const t = useT();
 
   const [text, setText] = useState('');
   const [scenes, setScenes] = useState<Preset[]>([]);
@@ -81,7 +83,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
     <div style={styles.page}>
       <div style={styles.toolbar}>
         <label style={styles.field}>
-          <span style={styles.label}>场景</span>
+          <span style={styles.label}>{t('polish.scene')}</span>
           <select
             data-testid="polish-scene"
             style={styles.select}
@@ -92,11 +94,11 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
               <option key={p.id} value={p.name}>{p.name}</option>
             ))}
           </select>
-          <button data-testid="manage-scene" style={styles.manage} onClick={() => setManagerKind('scene')}>管理</button>
+          <button data-testid="manage-scene" style={styles.manage} onClick={() => setManagerKind('scene')}>{t('polish.manage')}</button>
         </label>
 
         <label style={styles.field}>
-          <span style={styles.label}>语气</span>
+          <span style={styles.label}>{t('polish.tone')}</span>
           <select
             data-testid="polish-tone"
             style={styles.select}
@@ -107,7 +109,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
               <option key={p.id} value={p.name}>{p.name}</option>
             ))}
           </select>
-          <button data-testid="manage-tone" style={styles.manage} onClick={() => setManagerKind('tone')}>管理</button>
+          <button data-testid="manage-tone" style={styles.manage} onClick={() => setManagerKind('tone')}>{t('polish.manage')}</button>
         </label>
 
         <button
@@ -116,24 +118,24 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           onClick={run}
           disabled={text.trim().length === 0 || polishing || !scene || !tone}
         >
-          {polishing ? '润色中…' : '润色'}
+          {polishing ? t('polish.running') : t('polish.run')}
         </button>
       </div>
 
       <div style={styles.split}>
         <div style={styles.pane}>
-          <div style={styles.paneLabel}>原文</div>
+          <div style={styles.paneLabel}>{t('polish.original')}</div>
           <textarea
             data-testid="polish-text"
             style={styles.editor}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="在此输入或粘贴要润色的文本"
+            placeholder={t('polish.placeholder')}
           />
         </div>
 
         <div style={styles.pane}>
-          <div style={styles.paneLabel}>润色结果</div>
+          <div style={styles.paneLabel}>{t('polish.result')}</div>
           <div data-testid="polish-output" style={styles.output}>
             {output}
           </div>
@@ -151,7 +153,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           }}
           disabled={output.length === 0}
         >
-          采用
+          {t('polish.adopt')}
         </button>
         <button
           data-testid="polish-copy"
@@ -159,17 +161,17 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           onClick={() => void copy()}
           disabled={text.length === 0}
         >
-          复制
+          {t('polish.copy')}
         </button>
         <button
           data-testid="polish-close"
           style={styles.ghost}
           onClick={() => void vp.closeStudio()}
         >
-          关闭
+          {t('polish.close')}
         </button>
-        {copied && <span style={styles.hint}>已复制到剪贴板</span>}
-        {polishError && <span style={styles.error}>润色失败：{polishError}</span>}
+        {copied && <span style={styles.hint}>{t('polish.copied')}</span>}
+        {polishError && <span style={styles.error}>{t('polish.errorPrefix') + polishError}</span>}
       </div>
 
       {managerKind && (

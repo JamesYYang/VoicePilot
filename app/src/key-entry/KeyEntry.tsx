@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useT } from '../i18n';
 
 /**
  * 「设置 API Key」页。启动时无凭据则弹出。
@@ -10,6 +11,7 @@ import type { CSSProperties } from 'react';
 
 export default function KeyEntry({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
   const vp = bridge ?? window.voicepilot;
+  const t = useT();
   const [apiKey, setApiKey] = useState('');
   const [workspaceId, setWorkspaceId] = useState('');
   const [saving, setSaving] = useState(false);
@@ -17,7 +19,7 @@ export default function KeyEntry({ bridge }: { bridge?: Window['voicepilot'] } =
 
   const save = async () => {
     if (!apiKey.trim() || !workspaceId.trim()) {
-      setError('API Key 和工作空间 ID 都不能为空');
+      setError(t('key.emptyError'));
       return;
     }
     setSaving(true);
@@ -33,11 +35,11 @@ export default function KeyEntry({ bridge }: { bridge?: Window['voicepilot'] } =
 
   return (
     <div style={styles.page}>
-      <h1 style={styles.title}>设置 API Key</h1>
-      <p style={styles.hint}>请填入管理员发给你的百炼凭据，保存后即可开始使用。</p>
+      <h1 style={styles.title}>{t('key.title')}</h1>
+      <p style={styles.hint}>{t('key.hint')}</p>
 
       <label style={styles.field}>
-        <span style={styles.label}>API Key</span>
+        <span style={styles.label}>{t('key.apiKey')}</span>
         <input
           type="password"
           style={styles.input}
@@ -48,19 +50,19 @@ export default function KeyEntry({ bridge }: { bridge?: Window['voicepilot'] } =
       </label>
 
       <label style={styles.field}>
-        <span style={styles.label}>工作空间 ID（Workspace ID）</span>
+        <span style={styles.label}>{t('key.workspaceId')}</span>
         <input
           style={styles.input}
           value={workspaceId}
           onChange={(e) => setWorkspaceId(e.target.value)}
-          placeholder="业务空间 ID，不是 API Key"
+          placeholder={t('key.wsPlaceholder')}
         />
       </label>
 
       {error && <div style={styles.error}>{error}</div>}
 
       <button style={styles.save} onClick={() => void save()} disabled={saving}>
-        {saving ? '保存中…' : '保存'}
+        {saving ? t('key.saving') : t('key.save')}
       </button>
     </div>
   );

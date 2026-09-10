@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useT } from '../i18n';
 
 /**
  * 历史浏览（F6，本期只浏览不搜索）。
@@ -17,6 +18,7 @@ function fmtTime(ms: number) {
 
 export default function HistoryView({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
   const vp = bridge ?? window.voicepilot;
+  const t = useT();
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [selected, setSelected] = useState<HistoryRow | null>(null);
   const [copied, setCopied] = useState(false);
@@ -33,7 +35,7 @@ export default function HistoryView({ bridge }: { bridge?: Window['voicepilot'] 
   return (
     <div style={styles.page}>
       <aside style={styles.list}>
-        {rows.length === 0 && <div style={styles.empty}>还没有历史记录</div>}
+        {rows.length === 0 && <div style={styles.empty}>{t('history.empty')}</div>}
         {rows.map((r) => (
           <button key={r.id} style={styles.item(selected?.id === r.id)} onClick={() => open(r)}>
             <div style={styles.itemTime}>{fmtTime(r.created_at)}</div>
@@ -44,7 +46,7 @@ export default function HistoryView({ bridge }: { bridge?: Window['voicepilot'] 
                 {r.tone && <span style={styles.tag}>{r.tone}</span>}
               </div>
             )}
-            {r.polished && <span style={styles.polishedTag}>已润色</span>}
+            {r.polished && <span style={styles.polishedTag}>{t('history.polished')}</span>}
           </button>
         ))}
       </aside>
@@ -54,12 +56,12 @@ export default function HistoryView({ bridge }: { bridge?: Window['voicepilot'] 
           <>
             <div style={styles.detailMeta}>
               {fmtTime(selected.created_at)}
-              {selected.duration_ms != null && ` · ${Math.round(selected.duration_ms / 1000)} 秒`}
+              {selected.duration_ms != null && ` · ${Math.round(selected.duration_ms / 1000)} ${t('history.seconds')}`}
             </div>
             <pre style={styles.body}>{selected.text}</pre>
             {selected.polished && (
               <>
-                <div style={styles.detailLabel}>润色结果</div>
+                <div style={styles.detailLabel}>{t('history.result')}</div>
                 <pre style={styles.body}>{selected.polished}</pre>
               </>
             )}
@@ -70,19 +72,19 @@ export default function HistoryView({ bridge }: { bridge?: Window['voicepilot'] 
                   void vp.copy(selected.polished ?? selected.text).then((ok) => setCopied(ok));
                 }}
               >
-                复制
+                {t('history.copy')}
               </button>
               <button
                 style={styles.ghost}
                 onClick={() => void vp.openStudio({ text: selected.text, historyId: selected.id })}
               >
-                润色
+                {t('history.polish')}
               </button>
-              {copied && <span style={styles.hint}>已复制</span>}
+              {copied && <span style={styles.hint}>{t('history.copied')}</span>}
             </div>
           </>
         ) : (
-          <div style={styles.empty}>选中一条历史查看全文</div>
+          <div style={styles.empty}>{t('history.selectHint')}</div>
         )}
       </main>
     </div>

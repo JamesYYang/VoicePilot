@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import PolishView from './PolishView';
 import HistoryView from './HistoryView';
 import SettingsView from './SettingsView';
+import { useT } from '../i18n';
 
 /**
  * 主应用（Studio）外壳 —— 润色工作区的骨架（Task 3）。
@@ -16,14 +17,15 @@ import SettingsView from './SettingsView';
 
 type View = 'polish' | 'history' | 'settings';
 
-const NAV: { key: View; label: string }[] = [
-  { key: 'polish', label: '润色' },
-  { key: 'history', label: '历史' },
-  { key: 'settings', label: '设置' },
-];
-
 export default function Studio({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
+  const t = useT();
   const [view, setView] = useState<View>('polish');
+
+  const NAV: { key: View; label: string }[] = [
+    { key: 'polish', label: t('studio.polish') },
+    { key: 'history', label: t('studio.history') },
+    { key: 'settings', label: t('studio.settings') },
+  ];
 
   return (
     <div style={styles.page}>

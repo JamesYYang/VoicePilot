@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { useT } from '../i18n';
 
 /**
  * 首次使用欢迎页（F8）。不提问，只介绍快捷键与权限，点「开始使用」关窗。
@@ -6,21 +7,20 @@ import type { CSSProperties } from 'react';
  */
 export default function Onboarding({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
   const vp = bridge ?? window.voicepilot;
+  const t = useT();
   const isMac = navigator.userAgent.includes('Mac');
   const shortcut = isMac ? '⌥Space' : 'Ctrl+Shift+Space';
-  const permission = isMac
-    ? '请在系统设置中允许「麦克风」权限，并在「隐私与安全性 → 辅助功能」中允许 VoicePilot（全局快捷键需要）。'
-    : '首次使用请在系统设置中允许「麦克风」权限。';
+  const permission = isMac ? t('onboarding.permissionMac') : t('onboarding.permissionWin');
 
   return (
     <div style={styles.page}>
-      <h1 style={styles.title}>欢迎使用 <span style={styles.brand}>VoicePilot 闻字</span></h1>
+      <h1 style={styles.title}>{t('onboarding.titlePrefix')} <span style={styles.brand}>{t('productName')}</span></h1>
       <p style={styles.line}>
-        按 <b style={styles.key}>{shortcut}</b> 开始语音输入，说完自动生成文字，可一键复制或润色。
+        {t('onboarding.intro', { shortcut })}
       </p>
       <p style={styles.hint}>{permission}</p>
       <button style={styles.primary} onClick={() => void vp.closeOnboarding()}>
-        开始使用
+        {t('onboarding.start')}
       </button>
     </div>
   );

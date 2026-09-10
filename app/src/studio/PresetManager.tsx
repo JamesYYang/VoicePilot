@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useT } from '../i18n';
 
 /**
  * 预设管理模态框（场景 / 语气）。
@@ -17,6 +18,7 @@ interface Props {
 
 export default function PresetManager({ kind, bridge, onClose, onChanged }: Props) {
   const vp = bridge ?? window.voicepilot;
+  const t = useT();
   const [presets, setPresets] = useState<Preset[]>([]);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
@@ -46,7 +48,7 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
   const save = async () => {
     if (!name.trim()) return;
     if (presets.some((p) => p.name === name.trim() && p.id !== editingId)) {
-      setError('名称已存在');
+      setError(t('preset.nameExists'));
       return;
     }
     try {
@@ -75,7 +77,7 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div style={styles.head}>
-          <span>{kind === 'scene' ? '管理场景' : '管理语气'}</span>
+          <span>{kind === 'scene' ? t('preset.manageScene') : t('preset.manageTone')}</span>
           <button style={styles.close} onClick={onClose}>×</button>
         </div>
 
@@ -86,9 +88,9 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
                 <div style={styles.rowName}>{p.name}</div>
                 {p.description && <div style={styles.rowDesc}>{p.description}</div>}
               </div>
-              <button style={styles.link} onClick={() => startEdit(p)}>编辑</button>
+              <button style={styles.link} onClick={() => startEdit(p)}>{t('preset.edit')}</button>
               <button style={styles.link} disabled={p.is_builtin === 1} onClick={() => void del(p.id)}>
-                {p.is_builtin === 1 ? '内置' : '删除'}
+                {p.is_builtin === 1 ? t('preset.builtin') : t('preset.delete')}
               </button>
             </div>
           ))}
@@ -97,20 +99,20 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
         <div style={styles.form}>
           <input
             style={styles.input}
-            placeholder="名称"
+            placeholder={t('preset.name')}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
           <input
             style={styles.input}
-            placeholder="说明（可选，内联进润色提示词）"
+            placeholder={t('preset.descPlaceholder')}
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
           />
           <button style={styles.primary} onClick={() => void save()} disabled={!name.trim()}>
-            {editingId == null ? '新增' : '保存'}
+            {editingId == null ? t('preset.add') : t('preset.save')}
           </button>
-          {editingId != null && <button style={styles.link} onClick={reset}>取消编辑</button>}
+          {editingId != null && <button style={styles.link} onClick={reset}>{t('preset.cancelEdit')}</button>}
         </div>
         {error && <div style={styles.error}>{error}</div>}
       </div>
