@@ -10,16 +10,17 @@ import { useT, useLocale } from '../i18n';
  */
 
 interface Props {
-  kind: 'scene' | 'tone';
+  initialKind?: 'scene' | 'tone';
   bridge?: Window['voicepilot'];
   onClose: () => void;
   onChanged: () => void;
 }
 
-export default function PresetManager({ kind, bridge, onClose, onChanged }: Props) {
+export default function PresetManager({ initialKind = 'scene', bridge, onClose, onChanged }: Props) {
   const vp = bridge ?? window.voicepilot;
   const t = useT();
   const locale = useLocale();
+  const [tab, setTab] = useState<'scene' | 'tone'>(initialKind);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
@@ -27,10 +28,10 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
   const [error, setError] = useState<string | null>(null);
 
   const reload = () => {
-    void vp.listPresets(kind).then(setPresets);
+    void vp.listPresets(tab).then(setPresets);
   };
 
-  useEffect(reload, [vp, kind]);
+  useEffect(reload, [vp, tab]);
 
   const startEdit = (p: Preset) => {
     setEditingId(p.id);
@@ -53,7 +54,7 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
       return;
     }
     try {
-      await vp.savePreset({ id: editingId ?? undefined, kind, name: name.trim(), description: desc.trim(), lang: locale });
+      await vp.savePreset({ id: editingId ?? undefined, kind: tab, name: name.trim(), description: desc.trim(), lang: locale });
       setError(null);
       reset();
       reload();
@@ -78,7 +79,10 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div style={styles.head}>
-          <span>{kind === 'scene' ? t('preset.manageScene') : t('preset.manageTone')}</span>
+          <div style={styles.tabs}>
+            <button style={styles.tab(tab === 'scene')} onClick={() => { setTab('scene'); reset(); }}>{t('polish.scene')}</button>
+            <button style={styles.tab(tab === 'tone')} onClick={() => { setTab('tone'); reset(); }}>{t('polish.tone')}</button>
+          </div>
           <button style={styles.close} onClick={onClose}>×</button>
         </div>
 
@@ -124,7 +128,18 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
 const styles = {
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   modal: { width: 420, maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: 10, background: '#ffffff', borderRadius: 10, padding: 16, boxShadow: '0 8px 30px rgba(0,0,0,0.2)', color: '#1f2937', fontSize: 13 },
-  head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontWeight: 600 },
+  head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  tabs: { display: 'flex', gap: 4 },
+  tab: (active: boolean) => ({
+    padding: '4px 12px',
+    borderRadius: 6,
+    border: 'none',
+    background: active ? '#e0e7ff' : 'transparent',
+    color: active ? '#1d4ed8' : '#6b7280',
+    fontSize: 12,
+    fontWeight: active ? 600 : 400,
+    cursor: 'pointer',
+  }),
   close: { border: 'none', background: 'transparent', fontSize: 18, cursor: 'pointer', color: '#6b7280' },
   list: { display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' },
   row: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 6, background: '#f9fafb' },
@@ -136,4 +151,4 @@ const styles = {
   input: { flex: 1, minWidth: 0, padding: '5px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 12, outline: 'none' },
   primary: { padding: '5px 12px', borderRadius: 6, border: '1px solid #1d4ed8', background: '#1d4ed8', color: '#ffffff', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
   error: { color: '#dc2626', fontSize: 12 },
-} satisfies Record<string, CSSProperties>;
+} satisfies Record<string, CSSProperties | ((active: boolean) => CSSProperties)>;

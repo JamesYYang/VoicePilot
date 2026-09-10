@@ -24,7 +24,6 @@ export const zhCN = {
   // 润色工作区
   'polish.scene': '场景',
   'polish.tone': '语气',
-  'polish.manage': '管理',
   'polish.run': '润色',
   'polish.running': '润色中…',
   'polish.original': '原文',
@@ -45,8 +44,7 @@ export const zhCN = {
   'history.selectHint': '选中一条历史查看全文',
   'history.seconds': '秒',
   // 预设管理
-  'preset.manageScene': '管理场景',
-  'preset.manageTone': '管理语气',
+  'preset.manage': '管理预设',
   'preset.edit': '编辑',
   'preset.builtin': '内置',
   'preset.delete': '删除',

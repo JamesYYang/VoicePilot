@@ -31,7 +31,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
   const [tones, setTones] = useState<Preset[]>([]);
   const [scene, setScene] = useState<Preset | null>(null);
   const [tone, setTone] = useState<Preset | null>(null);
-  const [managerKind, setManagerKind] = useState<'scene' | 'tone' | null>(null);
+  const [managerOpen, setManagerOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [output, setOutput] = useState('');
   const [polishing, setPolishing] = useState(false);
@@ -94,7 +94,6 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
               <option key={p.id} value={p.name}>{p.name}</option>
             ))}
           </select>
-          <button data-testid="manage-scene" style={styles.manage} onClick={() => setManagerKind('scene')}>{t('polish.manage')}</button>
         </label>
 
         <label style={styles.field}>
@@ -109,7 +108,6 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
               <option key={p.id} value={p.name}>{p.name}</option>
             ))}
           </select>
-          <button data-testid="manage-tone" style={styles.manage} onClick={() => setManagerKind('tone')}>{t('polish.manage')}</button>
         </label>
 
         <button
@@ -119,6 +117,16 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
           disabled={text.trim().length === 0 || polishing || !scene || !tone}
         >
           {polishing ? t('polish.running') : t('polish.run')}
+        </button>
+
+        <button
+          data-testid="manage-presets"
+          style={styles.iconButton}
+          title={t('preset.manage')}
+          aria-label={t('preset.manage')}
+          onClick={() => setManagerOpen(true)}
+        >
+          ⚙
         </button>
       </div>
 
@@ -174,11 +182,10 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
         {polishError && <span style={styles.error}>{t('polish.errorPrefix') + polishError}</span>}
       </div>
 
-      {managerKind && (
+      {managerOpen && (
         <PresetManager
-          kind={managerKind}
           bridge={bridge}
-          onClose={() => setManagerKind(null)}
+          onClose={() => setManagerOpen(false)}
           onChanged={() => {
             void vp.syncStudio().then((s: StudioSync) => {
               setScenes(s.scenes);
@@ -230,13 +237,14 @@ const styles = {
     fontSize: 12,
     outline: 'none',
   },
-  manage: {
-    padding: '4px 8px',
+  iconButton: {
+    padding: '5px 9px',
     borderRadius: 6,
     border: '1px solid #d1d5db',
     background: '#ffffff',
-    color: '#111827',
-    fontSize: 12,
+    color: '#6b7280',
+    fontSize: 14,
+    lineHeight: 1,
     cursor: 'pointer',
   },
   run: {
