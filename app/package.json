@@ -15,6 +15,7 @@
     "dist:win:portable": "vite build && electron-builder --win portable"
   },
   "dependencies": {
+    "opencc-js": "^1.4.2",
     "ws": "^8.21.3"
   },
   "devDependencies": {

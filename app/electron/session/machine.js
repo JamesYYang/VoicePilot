@@ -4,6 +4,7 @@ import { AudioQueue } from './audio-queue.js';
 import { LatencyMetrics, formatSummary } from '../telemetry/metrics.js';
 import { t } from '../../shared/i18n/index.js';
 import { getCurrentLocale } from '../locale.js';
+import { toTraditional } from '../i18n/zh-convert.js';
 
 /**
  * 听写会话状态机（PRD §4.1）。跑在主进程，是唯一的状态源；渲染进程只负责显示。
@@ -153,7 +154,9 @@ export class SessionMachine {
       ...this.#creds,
       onResult: (ev) => {
         this.#metrics?.onResult(ev);
-        this.#emit('vp:asr/partial', ev);
+        void toTraditional(ev.text).then((text) => {
+          this.#emit('vp:asr/partial', { ...ev, text });
+        });
       },
       onError: (e) => this.#onSessionError(e),
       onClosed: (e) => this.#onSessionClosed(e),
