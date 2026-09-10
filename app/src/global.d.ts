@@ -115,6 +115,11 @@ interface VoicePilotBridge {
   getPermissionStatus(): Promise<{ accessibility: boolean | null }>;
   /** 打开系统设置 → 辅助功能页（macOS 深链） */
   openAccessibilitySettings(): Promise<boolean>;
+
+  // —— 语言（i18n）——
+  getLanguage(): Promise<{ locale: 'zh-CN' | 'zh-TW' | 'en-US' }>;
+  setLanguage(locale: 'zh-CN' | 'zh-TW' | 'en-US'): Promise<{ ok: boolean; locale: 'zh-CN' | 'zh-TW' | 'en-US' }>;
+  onLanguageChanged(cb: (locale: 'zh-CN' | 'zh-TW' | 'en-US') => void): () => void;
 }
 
 interface Window {

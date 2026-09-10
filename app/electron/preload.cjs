@@ -258,4 +258,19 @@ contextBridge.exposeInMainWorld('voicepilot', {
   openAccessibilitySettings() {
     return ipcRenderer.invoke('vp:permission/open-settings');
   },
+
+  // ---------------------------------------------------------------- 语言（i18n）
+
+  getLanguage() {
+    return ipcRenderer.invoke('vp:lang/get');
+  },
+
+  setLanguage(locale) {
+    return ipcRenderer.invoke('vp:lang/set', locale);
+  },
+
+  /** @param cb 收到新的 locale（'zh-CN' | 'zh-TW' | 'en-US'） */
+  onLanguageChanged(cb) {
+    return subscribe('vp:lang/changed', cb);
+  },
 });

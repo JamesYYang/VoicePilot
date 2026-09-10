@@ -1,7 +1,8 @@
-import { app, clipboard, ipcMain, shell, systemPreferences } from 'electron';
+import { app, clipboard, BrowserWindow, ipcMain, shell, systemPreferences } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
+import { getCurrentLocale, setCurrentLocale } from './locale.js';
 import { createStudioWindow, getStudioWindow } from './studio.js';
 import { getOnboardingWindow } from './onboarding.js';
 import { getKeyEntryWindow } from './key-entry.js';
@@ -23,7 +24,7 @@ import { streamPolish } from './llm/polish.js';
 let pendingStudioText = '';
 let pendingHistoryId = null;
 
-export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar }) {
+export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, rebuildTray }) {
   /**
    * 主进程 → 渲染进程。
    * 悬浮条可能还没加载完，也可能已被关闭，发送前必须检查。
@@ -32,6 +33,12 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar }
     const bar = getBar();
     if (bar && !bar.isDestroyed()) bar.webContents.send(channel, payload);
   };
+
+  function broadcastLocale(locale) {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('vp:lang/changed', locale);
+    }
+  }
 
   const machine = new SessionMachine({ emit });
 
@@ -244,6 +251,18 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar }
   ipcMain.handle('vp:key/close', () => {
     getKeyEntryWindow()?.close();
     return true;
+  });
+
+  // ---------------------------------------------------------------- 语言（i18n）
+
+  ipcMain.handle('vp:lang/get', () => ({ locale: getCurrentLocale() }));
+
+  ipcMain.handle('vp:lang/set', (_e, locale) => {
+    const ok = setCurrentLocale(locale);
+    if (!ok) return { ok: false, locale: getCurrentLocale() };
+    broadcastLocale(locale);
+    rebuildTray?.();
+    return { ok: true, locale };
   });
 
   // ---------------------------------------------------------------- 权限（F12）
