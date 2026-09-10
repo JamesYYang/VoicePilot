@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionMachine } from './session/machine.js';
 import { getCurrentLocale, setCurrentLocale } from './locale.js';
+import { t } from '../shared/i18n/index.js';
 import { createStudioWindow, getStudioWindow } from './studio.js';
 import { getOnboardingWindow } from './onboarding.js';
 import { getKeyEntryWindow } from './key-entry.js';
@@ -36,7 +37,11 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
 
   function broadcastLocale(locale) {
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('vp:lang/changed', locale);
+      if (win.isDestroyed()) continue;
+      win.webContents.send('vp:lang/changed', locale);
+      // 已打开的二级窗口（studio/onboarding/key-entry/diag）标题栏也要跟着切。
+      // 窗口创建时把对应字典 key 存到 win.vpTitleKey（悬浮条/自测窗没标题，跳过）。
+      if (win.vpTitleKey) win.setTitle(t(locale, win.vpTitleKey));
     }
   }
 

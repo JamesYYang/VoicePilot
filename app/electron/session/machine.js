@@ -239,7 +239,10 @@ export class SessionMachine {
     if (this.#state === 'idle' || this.#state === 'draining' || this.#state === 'reviewing') return;
 
     if (e.kind === 'throttling') {
-      this.#scheduleRetry('throttling', e.message || t(getCurrentLocale(), 'machine.busy'));
+      // 限流统一用翻译文案，不把服务端英文原文（e.message）混进 retryExhausted
+      // 模板 —— 否则会出现「Service unavailable，已重试 2 次仍未成功」。原文进日志。
+      if (e.message) console.warn(`[会话] throttling 服务端原文：${e.message}`);
+      this.#scheduleRetry('throttling', t(getCurrentLocale(), 'machine.busy'));
       return;
     }
 

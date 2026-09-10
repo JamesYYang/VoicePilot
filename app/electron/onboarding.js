@@ -33,6 +33,8 @@ export function createOnboardingWindow({ attachDevLogging }) {
       nodeIntegration: false,
     },
   });
+  // 语言切换时由 broadcastLocale 据此刷新 OS 标题栏（见 ipc.js）
+  win.vpTitleKey = 'window.onboarding';
 
   attachDevLogging(win);
   win.loadURL('app://voicepilot/index.html#onboarding');

@@ -54,10 +54,10 @@ CREATE TABLE IF NOT EXISTS meta (
 
 let db = null;
 
-function seedPresets() {
-  const { n } = db.prepare('SELECT COUNT(*) AS n FROM presets').get();
+function seedPresets(d) {
+  const { n } = d.prepare('SELECT COUNT(*) AS n FROM presets').get();
   if (n > 0) return;
-  const ins = db.prepare(
+  const ins = d.prepare(
     'INSERT INTO presets (kind, name, name_zh_cn, name_zh_tw, name_en, description, is_builtin, sort_order) VALUES (?,?,?,?,?,?,1,?)'
   );
   BUILTIN_SCENES.forEach(([zh, tw, en], i) => ins.run('scene', zh, zh, tw, en, '', i));
@@ -68,15 +68,30 @@ function seedPresets() {
  * 旧库迁移：为已存在的 presets 表补三语列与 lang 列。
  * 用 PRAGMA table_info 探测，缺哪列补哪列，不重写表、不动已有数据。
  */
-function migratePresets() {
-  const cols = db.prepare('PRAGMA table_info(presets)').all().map((c) => c.name);
+function migratePresets(d) {
+  const cols = d.prepare('PRAGMA table_info(presets)').all().map((c) => c.name);
   const add = (name, ddl) => {
-    if (!cols.includes(name)) db.exec(ddl);
+    if (!cols.includes(name)) d.exec(ddl);
   };
   add('name_zh_cn', 'ALTER TABLE presets ADD COLUMN name_zh_cn TEXT');
   add('name_zh_tw', 'ALTER TABLE presets ADD COLUMN name_zh_tw TEXT');
   add('name_en', 'ALTER TABLE presets ADD COLUMN name_en TEXT');
   add('lang', 'ALTER TABLE presets ADD COLUMN lang TEXT');
+}
+
+/**
+ * 旧库内置预设三语列回填。
+ *
+ * 老库只存 zh-CN 名（name 列），三语列迁移补列后是 NULL。这里对
+ * `is_builtin=1` 且 `name_zh_cn IS NULL` 的行，按 name 反查 BUILTIN_SCENES /
+ * BUILTIN_TONES 的 zh-CN 名，补齐三列。幂等：补完 name_zh_cn 非空，再跑直接跳过。
+ */
+function backfillBuiltinPresetNames(d) {
+  const upd = d.prepare(
+    'UPDATE presets SET name_zh_cn = ?, name_zh_tw = ?, name_en = ? WHERE kind = ? AND name = ? AND is_builtin = 1 AND name_zh_cn IS NULL'
+  );
+  BUILTIN_SCENES.forEach(([zh, tw, en]) => upd.run(zh, tw, en, 'scene', zh));
+  BUILTIN_TONES.forEach(([zh, tw, en]) => upd.run(zh, tw, en, 'tone', zh));
 }
 
 /**
@@ -95,14 +110,30 @@ export function migrateDefaultScene() {
   if (row) setMeta('default_scene_id', row.id);
 }
 
+function initStore(d) {
+  d.exec(SCHEMA);
+  migratePresets(d);
+  backfillBuiltinPresetNames(d);
+  seedPresets(d);
+  migrateDefaultScene();
+}
+
 export function openStore(dbPath) {
   if (db) return db;
   const path = dbPath ?? join(app.getPath('userData'), 'voicepilot.db');
   db = new DatabaseSync(path);
-  db.exec(SCHEMA);
-  migratePresets();
-  seedPresets();
-  migrateDefaultScene();
+  initStore(db);
+  return db;
+}
+
+/**
+ * 自测专用：把已构造好的库实例（如旧 schema 的 :memory: 库）接上完整迁移管线，
+ * 并接管为当前库。生产代码只走 openStore；这条入口只为「旧库 → 补列 + 回填」
+ * 迁移自测提供一个可控的起点。
+ */
+export function openStoreWithDb(instance) {
+  db = instance;
+  initStore(db);
   return db;
 }
 

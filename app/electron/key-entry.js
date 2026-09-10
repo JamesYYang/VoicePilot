@@ -35,6 +35,8 @@ export function createKeyEntryWindow({ attachDevLogging }) {
       nodeIntegration: false,
     },
   });
+  // 语言切换时由 broadcastLocale 据此刷新 OS 标题栏（见 ipc.js）
+  win.vpTitleKey = 'window.keyEntry';
 
   attachDevLogging(win);
   win.loadURL('app://voicepilot/index.html#key-entry');

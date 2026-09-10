@@ -260,6 +260,8 @@ function createDiagWindow() {
       backgroundThrottling: false,
     },
   });
+  // 语言切换时由 broadcastLocale 据此刷新 OS 标题栏（见 ipc.js）
+  diag.vpTitleKey = 'window.diag';
 
   // VP_OPEN_DIAG 给纯数字时当作自动采集时长（毫秒），跑完自动停并导出。
   const autorun = Number(process.env.VP_OPEN_DIAG);
