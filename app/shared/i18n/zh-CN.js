@@ -88,8 +88,6 @@ export const zhCN = {
   'machine.retryExhausted': '{{message}}，已重试 {{attempt}} 次仍未成功',
   // 托盘
   'tray.openMain': '打开主应用',
-  'tray.showBar': '显示悬浮条',
-  'tray.hideBar': '隐藏悬浮条',
   'tray.diag': '采集诊断（M1）',
   'tray.setKey': '设置 API Key',
   'tray.quit': '退出',

@@ -312,11 +312,6 @@ function rebuildTray() {
     Menu.buildFromTemplate([
       { label: t(locale, 'tray.openMain'), click: () => createStudioWindow({ attachDevLogging }) },
       { type: 'separator' },
-      // 必须用 showInactive()：show() 会激活窗口，抢走目标应用的焦点，
-      // 直接违反 A2「全过程不抢焦点」。
-      { label: t(locale, 'tray.showBar'), click: () => bar?.showInactive() },
-      { label: t(locale, 'tray.hideBar'), click: () => bar?.hide() },
-      { type: 'separator' },
       { label: t(locale, 'tray.diag'), click: () => createDiagWindow() },
       { type: 'separator' },
       { label: t(locale, 'tray.setKey'), click: () => createKeyEntryWindow({ attachDevLogging }) },

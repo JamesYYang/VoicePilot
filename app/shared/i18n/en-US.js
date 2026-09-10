@@ -78,8 +78,6 @@ export const enUS = {
   'machine.disconnected': 'Connection lost',
   'machine.retryExhausted': '{{message}}, retried {{attempt}} times without success',
   'tray.openMain': 'Open Main App',
-  'tray.showBar': 'Show Bar',
-  'tray.hideBar': 'Hide Bar',
   'tray.diag': 'Capture Diagnostic (M1)',
   'tray.setKey': 'Set API Key',
   'tray.quit': 'Quit',

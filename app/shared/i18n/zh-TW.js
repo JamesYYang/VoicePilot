@@ -78,8 +78,6 @@ export const zhTW = {
   'machine.disconnected': '連線中斷',
   'machine.retryExhausted': '{{message}}，已重試 {{attempt}} 次仍未成功',
   'tray.openMain': '開啟主應用',
-  'tray.showBar': '顯示懸浮條',
-  'tray.hideBar': '隱藏懸浮條',
   'tray.diag': '採集診斷（M1）',
   'tray.setKey': '設定 API Key',
   'tray.quit': '退出',
