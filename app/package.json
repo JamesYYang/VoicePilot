@@ -12,7 +12,8 @@
     "dev": "VP_DEV_URL=http://localhost:5173 electron .",
     "typecheck": "tsc --noEmit",
     "dist:win": "vite build && electron-builder --win",
-    "dist:win:portable": "vite build && electron-builder --win portable"
+    "dist:win:portable": "vite build && electron-builder --win portable",
+    "dist:mac": "vite build && electron-builder --mac"
   },
   "dependencies": {
     "opencc-js": "^1.4.2",
@@ -46,6 +47,12 @@
     "win": {
       "target": ["nsis", "portable"],
       "icon": "build/voicepilot-icon.ico"
+    },
+    "mac": {
+      "target": ["dir", "dmg"],
+      "identity": null,
+      "icon": "build/voicepilot-icon-512.png",
+      "category": "public.app-category.productivity"
     },
     "nsis": {
       "oneClick": false,
