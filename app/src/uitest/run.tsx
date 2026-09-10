@@ -360,9 +360,9 @@ export async function runUiTest() {
     syncStudio: () =>
       Promise.resolve({
         text: '测试原文',
-        scenes: [{ id: 1, name: '邮件', description: '', is_builtin: 1 }],
-        tones: [{ id: 5, name: '正式', description: '', is_builtin: 1 }],
-        defaultScene: null,
+        scenes: [{ id: 1, name: '邮件', description: '', lang: null, is_builtin: 1 }],
+        tones: [{ id: 5, name: '正式', description: '', lang: null, is_builtin: 1 }],
+        defaultSceneId: null,
       }),
     startPolish: (p: { text: string; scene: Preset; tone: Preset }) => {
       polishCall.payload = p;
@@ -375,7 +375,7 @@ export async function runUiTest() {
     onPolishDelta: (cb: (p: { text: string }) => void) => { studioDelta.cb = cb; return () => {}; },
     onPolishDone: (cb: () => void) => { studioDone.cb = cb; return () => {}; },
     onPolishError: (cb: (p: { message: string }) => void) => { studioError.cb = cb; return () => {}; },
-    listPresets: () => Promise.resolve([{ id: 1, name: '邮件', description: '', is_builtin: 1 }]),
+    listPresets: () => Promise.resolve([{ id: 1, name: '邮件', description: '', lang: null, is_builtin: 1 }]),
     savePreset: () => Promise.resolve({ id: 2 }),
     deletePreset: () => Promise.resolve(true),
   };

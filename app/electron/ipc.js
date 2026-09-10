@@ -159,13 +159,16 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     return true;
   });
 
-  /** 主应用挂载时拉一次：待润色文本 + 场景/语气预设（来自 DB）。 */
-  ipcMain.handle('vp:studio/sync', () => ({
-    text: pendingStudioText,
-    scenes: listPresets('scene'),
-    tones: listPresets('tone'),
-    defaultScene: getMeta('default_scene'),
-  }));
+  /** 主应用挂载时拉一次：待润色文本 + 场景/语气预设（来自 DB，按当前 locale 取名）。 */
+  ipcMain.handle('vp:studio/sync', () => {
+    const locale = getCurrentLocale();
+    return {
+      text: pendingStudioText,
+      scenes: listPresets('scene', locale),
+      tones: listPresets('tone', locale),
+      defaultSceneId: getMeta('default_scene_id') ? Number(getMeta('default_scene_id')) : null,
+    };
+  });
 
   /** 关闭主应用窗口。 */
   ipcMain.handle('vp:studio/close', () => {
@@ -173,8 +176,8 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     return true;
   });
 
-  /** 预设列表。 */
-  ipcMain.handle('vp:preset/list', (_e, kind) => listPresets(kind));
+  /** 预设列表。按当前 locale 取名，让 PresetManager 显示三语名。 */
+  ipcMain.handle('vp:preset/list', (_e, kind) => listPresets(kind, getCurrentLocale()));
 
   /** 新建/编辑预设（有 id 更新、无 id 新建）。 */
   ipcMain.handle('vp:preset/save', (_e, { id, kind, name, description }) => {
@@ -191,8 +194,9 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
    * 结果走三个事件：vp:polish/delta（增量）/ done（收尾）/ error（失败）。
    */
   ipcMain.handle('vp:polish/start', async (_e, { text, scene, tone }) => {
-    // last-used 默认场景：记住本次润色用的场景，下次打开默认选中。独立 try 避免影响润色本身。
-    try { if (scene?.name) setMeta('default_scene', scene.name); } catch {}
+    // last-used 默认场景：记住本次润色用的场景 id（稳定，不随 locale 变），
+    // 下次打开默认选中。独立 try 避免影响润色本身。
+    try { if (scene?.id != null) setMeta('default_scene_id', scene.id); } catch {}
     const win = getStudioWindow();
     const emit = (channel, payload) => win?.webContents.send(channel, payload);
 

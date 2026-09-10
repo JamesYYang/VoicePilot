@@ -162,7 +162,7 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:studio/open', payload);
   },
 
-  /** 主应用挂载时拉 {text, scenes, tones, defaultScene}。 */
+  /** 主应用挂载时拉 {text, scenes, tones, defaultSceneId}。 */
   syncStudio() {
     return ipcRenderer.invoke('vp:studio/sync');
   },

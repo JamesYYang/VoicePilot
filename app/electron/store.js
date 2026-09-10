@@ -10,8 +10,18 @@ import { join } from 'node:path';
  * 省掉原生模块与 electron-rebuild 一整套。三张表：history / presets / meta。
  */
 
-const BUILTIN_SCENES = ['文档', '邮件', '即时通讯', '社媒'];
-const BUILTIN_TONES = ['正式', '口语', '简洁', '热情'];
+const BUILTIN_SCENES = [
+  ['文档', '文檔', 'Document'],
+  ['邮件', '郵件', 'Email'],
+  ['即时通讯', '即時通訊', 'Instant Messaging'],
+  ['社媒', '社媒', 'Social Media'],
+];
+const BUILTIN_TONES = [
+  ['正式', '正式', 'Formal'],
+  ['口语', '口語', 'Casual'],
+  ['简洁', '簡潔', 'Concise'],
+  ['热情', '熱情', 'Warm'],
+];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS history (
@@ -27,7 +37,11 @@ CREATE TABLE IF NOT EXISTS presets (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   kind        TEXT NOT NULL CHECK(kind IN ('scene','tone')),
   name        TEXT NOT NULL,
+  name_zh_cn  TEXT,
+  name_zh_tw  TEXT,
+  name_en     TEXT,
   description TEXT NOT NULL DEFAULT '',
+  lang        TEXT,
   is_builtin  INTEGER NOT NULL DEFAULT 0,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   UNIQUE(kind, name)
@@ -44,10 +58,25 @@ function seedPresets() {
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM presets').get();
   if (n > 0) return;
   const ins = db.prepare(
-    'INSERT INTO presets (kind, name, description, is_builtin, sort_order) VALUES (?,?,?,1,?)'
+    'INSERT INTO presets (kind, name, name_zh_cn, name_zh_tw, name_en, description, is_builtin, sort_order) VALUES (?,?,?,?,?,?,1,?)'
   );
-  BUILTIN_SCENES.forEach((name, i) => ins.run('scene', name, '', i));
-  BUILTIN_TONES.forEach((name, i) => ins.run('tone', name, '', i));
+  BUILTIN_SCENES.forEach(([zh, tw, en], i) => ins.run('scene', zh, zh, tw, en, '', i));
+  BUILTIN_TONES.forEach(([zh, tw, en], i) => ins.run('tone', zh, zh, tw, en, '', i));
+}
+
+/**
+ * 旧库迁移：为已存在的 presets 表补三语列与 lang 列。
+ * 用 PRAGMA table_info 探测，缺哪列补哪列，不重写表、不动已有数据。
+ */
+function migratePresets() {
+  const cols = db.prepare('PRAGMA table_info(presets)').all().map((c) => c.name);
+  const add = (name, ddl) => {
+    if (!cols.includes(name)) db.exec(ddl);
+  };
+  add('name_zh_cn', 'ALTER TABLE presets ADD COLUMN name_zh_cn TEXT');
+  add('name_zh_tw', 'ALTER TABLE presets ADD COLUMN name_zh_tw TEXT');
+  add('name_en', 'ALTER TABLE presets ADD COLUMN name_en TEXT');
+  add('lang', 'ALTER TABLE presets ADD COLUMN lang TEXT');
 }
 
 export function openStore(dbPath) {
@@ -55,6 +84,7 @@ export function openStore(dbPath) {
   const path = dbPath ?? join(app.getPath('userData'), 'voicepilot.db');
   db = new DatabaseSync(path);
   db.exec(SCHEMA);
+  migratePresets();
   seedPresets();
   return db;
 }
@@ -91,24 +121,30 @@ export function updateHistoryPolish(id, { polished, scene, tone }) {
 
 // ---------------------------------------------------------------- 预设
 
-export function listPresets(kind) {
+export function listPresets(kind, locale = 'zh-CN') {
   openStore();
-  return db
-    .prepare('SELECT id, name, description, is_builtin FROM presets WHERE kind = ? ORDER BY sort_order, id')
+  const rows = db
+    .prepare('SELECT id, name, name_zh_cn, name_zh_tw, name_en, description, lang, is_builtin FROM presets WHERE kind = ? ORDER BY sort_order, id')
     .all(kind);
+  return rows.map((r) => {
+    const name = r.is_builtin
+      ? (locale === 'zh-TW' ? r.name_zh_tw : locale === 'en-US' ? r.name_en : r.name_zh_cn) ?? r.name
+      : r.name;
+    return { id: r.id, name, description: r.description, lang: r.lang, is_builtin: r.is_builtin };
+  });
 }
 
-export function savePreset({ id, kind, name, description = '' }) {
+export function savePreset({ id, kind, name, description = '', lang = null }) {
   openStore();
   if (id != null) {
-    db.prepare('UPDATE presets SET name = ?, description = ? WHERE id = ?')
-      .run(name, description, id);
+    db.prepare('UPDATE presets SET name = ?, description = ?, lang = ? WHERE id = ?')
+      .run(name, description, lang, id);
     return { id };
   }
   const { m } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM presets WHERE kind = ?').get(kind);
   const r = db
-    .prepare('INSERT INTO presets (kind, name, description, is_builtin, sort_order) VALUES (?,?,?,0,?)')
-    .run(kind, name, description, m + 1);
+    .prepare('INSERT INTO presets (kind, name, description, lang, is_builtin, sort_order) VALUES (?,?,?,?,0,?)')
+    .run(kind, name, description, lang, m + 1);
   return { id: Number(r.lastInsertRowid) };
 }
 

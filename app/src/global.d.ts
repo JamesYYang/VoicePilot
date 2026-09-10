@@ -4,6 +4,7 @@ interface Preset {
   id: number;
   name: string;
   description: string;
+  lang: string | null;
   is_builtin: number;
 }
 
@@ -84,8 +85,8 @@ interface VoicePilotBridge {
   historyGet(id: number): Promise<HistoryRow | null>;
   /** 采用润色结果，回写历史 */
   adoptPolish(payload: { polished: string; scene: string; tone: string }): Promise<boolean>;
-  /** 主应用挂载时拉 {text, scenes, tones, defaultScene} */
-  syncStudio(): Promise<{ text: string; scenes: Preset[]; tones: Preset[]; defaultScene: string | null }>;
+  /** 主应用挂载时拉 {text, scenes, tones, defaultSceneId} */
+  syncStudio(): Promise<{ text: string; scenes: Preset[]; tones: Preset[]; defaultSceneId: number | null }>;
   /** 关闭主应用窗口 */
   closeStudio(): Promise<boolean>;
   /** 发起润色。流式结果经 onPolishDelta/onPolishDone/onPolishError 回传 */

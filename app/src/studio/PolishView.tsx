@@ -19,7 +19,7 @@ interface StudioSync {
   text: string;
   scenes: Preset[];
   tones: Preset[];
-  defaultScene: string | null;
+  defaultSceneId: number | null;
 }
 
 export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] } = {}) {
@@ -42,7 +42,7 @@ export default function PolishView({ bridge }: { bridge?: Window['voicepilot'] }
       setText(s.text);
       setScenes(s.scenes);
       setTones(s.tones);
-      setScene(s.scenes.find((p) => p.name === s.defaultScene) ?? s.scenes[0] ?? null);
+      setScene(s.scenes.find((p) => p.id === s.defaultSceneId) ?? s.scenes[0] ?? null);
       setTone(s.tones[0] ?? null);
     });
   }, [vp]);
