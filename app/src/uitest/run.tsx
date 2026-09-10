@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import App from '../App';
 import Studio from '../studio/Studio';
+import { I18nProvider } from '../i18n';
 
 /**
  * 悬浮条界面自测。用法：
@@ -378,6 +379,11 @@ export async function runUiTest() {
     listPresets: () => Promise.resolve([{ id: 1, name: '邮件', description: '', lang: null, is_builtin: 1 }]),
     savePreset: () => Promise.resolve({ id: 2 }),
     deletePreset: () => Promise.resolve(true),
+    // i18n：en-US 断言要经 I18nProvider 走 getLanguage/onLanguageChanged。
+    // 这两个必须显式声明 —— 与上面 copy/reportPainted 同理，`...real`
+    // 复制不到 contextBridge 的非枚举属性，缺了会静默 reject。
+    getLanguage: () => Promise.resolve({ locale: 'en-US' as const }),
+    onLanguageChanged: () => () => {},
   };
 
   createRoot(studioContainer).render(<Studio bridge={studioBridge} />);
@@ -479,6 +485,29 @@ export async function runUiTest() {
     '润色失败后按钮恢复可点',
     studioContainer.querySelector<HTMLButtonElement>('[data-testid="polish-run"]')?.disabled ===
       false
+  );
+
+  // ---- 13. i18n 三语断言：en-US 下 Studio 导航栏应为英文 ----
+  // 单独起一个渲染实例套 I18nProvider，不动上面 zh-CN 默认语境下的断言流。
+  // getLanguage 异步返回 en-US，需等 locale 翻转后再断言；否则会拿
+  // I18nProvider 初始态（resolveLocale(navigator.language) 的映射值）误判。
+  const enStudioContainer = document.createElement('div');
+  document.body.appendChild(enStudioContainer);
+  createRoot(enStudioContainer).render(
+    <I18nProvider bridge={studioBridge}>
+      <Studio bridge={studioBridge} />
+    </I18nProvider>
+  );
+  const enNavLabels = () =>
+    Array.from(enStudioContainer.querySelectorAll('aside button')).map((b) => b.textContent);
+  const okEnNav = await waitFor(() => {
+    const labels = enNavLabels();
+    return labels.includes('Polish') && labels.includes('History') && labels.includes('Settings');
+  });
+  check(
+    'en-US 下 Studio 导航栏为英文（Polish/History/Settings）',
+    okEnNav,
+    JSON.stringify(enNavLabels())
   );
 
   const failed = results.filter((r) => !r.ok);
