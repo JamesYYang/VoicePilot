@@ -94,7 +94,7 @@ interface VoicePilotBridge {
   /** 预设列表（kind = scene | tone） */
   listPresets(kind: 'scene' | 'tone'): Promise<Preset[]>;
   /** 新建/编辑预设（有 id 更新、无 id 新建） */
-  savePreset(payload: { id?: number; kind: 'scene' | 'tone'; name: string; description: string }): Promise<{ id: number }>;
+  savePreset(payload: { id?: number; kind: 'scene' | 'tone'; name: string; description: string; lang: string }): Promise<{ id: number }>;
   /** 删除预设（内置不可删，返回 false） */
   deletePreset(id: number): Promise<boolean>;
   /** 润色流式增量，逐块推送 */

@@ -79,6 +79,22 @@ function migratePresets() {
   add('lang', 'ALTER TABLE presets ADD COLUMN lang TEXT');
 }
 
+/**
+ * 旧元数据迁移：默认场景从存 name（default_scene）改成存 id（default_scene_id）。
+ * 若 default_scene_id 已存在则跳过；否则按旧 default_scene 的 name 反查场景 id，
+ * 命中写 default_scene_id，未命中（或旧值不存在）则清掉 default_scene 键。
+ * 幂等，可安全在每次 openStore 时调用。
+ */
+export function migrateDefaultScene() {
+  openStore();
+  if (getMeta('default_scene_id') != null) return;
+  const name = getMeta('default_scene');
+  if (!name) return;
+  const row = db.prepare('SELECT id FROM presets WHERE kind = ? AND name = ?').get('scene', name);
+  db.prepare('DELETE FROM meta WHERE key = ?').run('default_scene');
+  if (row) setMeta('default_scene_id', row.id);
+}
+
 export function openStore(dbPath) {
   if (db) return db;
   const path = dbPath ?? join(app.getPath('userData'), 'voicepilot.db');
@@ -86,6 +102,7 @@ export function openStore(dbPath) {
   db.exec(SCHEMA);
   migratePresets();
   seedPresets();
+  migrateDefaultScene();
   return db;
 }
 
@@ -137,8 +154,14 @@ export function listPresets(kind, locale = 'zh-CN') {
 export function savePreset({ id, kind, name, description = '', lang = null }) {
   openStore();
   if (id != null) {
-    db.prepare('UPDATE presets SET name = ?, description = ?, lang = ? WHERE id = ?')
-      .run(name, description, lang, id);
+    // lang 仅在显式传入时更新，避免编辑预设（不传 lang）把已存的 lang 清成 NULL。
+    if (lang != null) {
+      db.prepare('UPDATE presets SET name = ?, description = ?, lang = ? WHERE id = ?')
+        .run(name, description, lang, id);
+    } else {
+      db.prepare('UPDATE presets SET name = ?, description = ? WHERE id = ?')
+        .run(name, description, id);
+    }
     return { id };
   }
   const { m } = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM presets WHERE kind = ?').get(kind);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useT } from '../i18n';
+import { useT, useLocale } from '../i18n';
 
 /**
  * 预设管理模态框（场景 / 语气）。
@@ -19,6 +19,7 @@ interface Props {
 export default function PresetManager({ kind, bridge, onClose, onChanged }: Props) {
   const vp = bridge ?? window.voicepilot;
   const t = useT();
+  const locale = useLocale();
   const [presets, setPresets] = useState<Preset[]>([]);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
@@ -52,7 +53,7 @@ export default function PresetManager({ kind, bridge, onClose, onChanged }: Prop
       return;
     }
     try {
-      await vp.savePreset({ id: editingId ?? undefined, kind, name: name.trim(), description: desc.trim() });
+      await vp.savePreset({ id: editingId ?? undefined, kind, name: name.trim(), description: desc.trim(), lang: locale });
       setError(null);
       reset();
       reload();

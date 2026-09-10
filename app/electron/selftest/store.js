@@ -1,6 +1,6 @@
 import {
   openStore, saveHistory, listHistory, getHistory, updateHistoryPolish,
-  listPresets, savePreset, deletePreset, getMeta, setMeta,
+  listPresets, savePreset, deletePreset, getMeta, setMeta, migrateDefaultScene,
 } from '../store.js';
 
 export async function runStoreSelftest() {
@@ -31,7 +31,7 @@ export async function runStoreSelftest() {
   const { id: pid } = savePreset({ kind: 'scene', name: '周报', description: '每周汇报', lang: 'zh-CN' });
   const okAdd = listPresets('scene').some((p) => p.id === pid && p.description === '每周汇报' && p.lang === 'zh-CN');
   savePreset({ id: pid, kind: 'scene', name: '周报', description: '改动后的说明' });
-  const okEdit = listPresets('scene').some((p) => p.id === pid && p.description === '改动后的说明');
+  const okEdit = listPresets('scene').some((p) => p.id === pid && p.description === '改动后的说明' && p.lang === 'zh-CN');
   const okBuiltinKeep = deletePreset(scenes[0].id) === false; // 内置不可删
   const okDel = deletePreset(pid) === true;
 
@@ -39,7 +39,18 @@ export async function runStoreSelftest() {
   setMeta('first_run_done', 'true');
   const okMeta = getMeta('first_run_done') === 'true';
 
-  const ok = okSeed && okWrite && okUpdate && okAdd && okEdit && okBuiltinKeep && okDel && okMeta && okTrilingual;
-  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual}`);
+  // 旧 default_scene(name) → default_scene_id(id) 迁移
+  setMeta('default_scene', '不存在的场景');
+  migrateDefaultScene();
+  const okMigrateMiss = getMeta('default_scene_id') == null && getMeta('default_scene') == null;
+  setMeta('default_scene', '邮件');
+  migrateDefaultScene();
+  const okMigrateHit = getMeta('default_scene_id') === '2' && getMeta('default_scene') == null;
+  migrateDefaultScene(); // 幂等：已有 default_scene_id，不再动
+  const okMigrateIdem = getMeta('default_scene_id') === '2';
+
+  const ok = okSeed && okWrite && okUpdate && okAdd && okEdit && okBuiltinKeep && okDel && okMeta && okTrilingual &&
+    okMigrateMiss && okMigrateHit && okMigrateIdem;
+  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem}`);
   return { ok };
 }

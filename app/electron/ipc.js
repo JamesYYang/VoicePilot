@@ -179,9 +179,9 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
   /** 预设列表。按当前 locale 取名，让 PresetManager 显示三语名。 */
   ipcMain.handle('vp:preset/list', (_e, kind) => listPresets(kind, getCurrentLocale()));
 
-  /** 新建/编辑预设（有 id 更新、无 id 新建）。 */
-  ipcMain.handle('vp:preset/save', (_e, { id, kind, name, description }) => {
-    const r = savePreset({ id: id ?? null, kind, name, description });
+  /** 新建/编辑预设（有 id 更新、无 id 新建）。lang 记当前 locale（主进程兜底）。 */
+  ipcMain.handle('vp:preset/save', (_e, { id, kind, name, description, lang }) => {
+    const r = savePreset({ id: id ?? null, kind, name, description, lang: lang ?? getCurrentLocale() });
     // 返回后由渲染进程自己刷新列表
     return r;
   });
