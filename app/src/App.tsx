@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { CaptureEngine } from './audio/capture';
+import { useT } from './i18n';
 
 /**
  * 悬浮条（PRD §4.1 / §5.6）。
@@ -101,6 +102,24 @@ export interface AppProps {
 
 export default function App({ bridge, createCapture }: AppProps = {}) {
   const vp = bridge ?? window.voicepilot;
+  const t = useT();
+
+  const LABEL: Record<SessionState, string> = {
+    warming: t('bar.warming'),
+    listening: t('bar.listening'),
+    draining: t('bar.draining'),
+    reviewing: t('bar.reviewing'),
+    idle: '',
+  };
+
+  const ERROR_TEXT: Record<string, string> = {
+    mic: t('bar.err.mic'),
+    clipboard: t('bar.err.clipboard'),
+    network: t('bar.err.network'),
+    throttling: t('bar.err.throttling'),
+    key: t('bar.err.key'),
+    asr: t('bar.err.asr'),
+  };
 
   const [snap, setSnap] = useState<Snapshot>({ state: 'idle', notice: null, truncated: false });
   const [committed, setCommitted] = useState<Committed[]>([]);
@@ -346,8 +365,8 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     }
     // 复制失败要**看得见**。静默失败最糟糕：用户以为复制成功了，
     // 切到目标应用一粘贴，出来的是上一次的内容。
-    showError({ kind: 'clipboard', message: '复制失败，请重试' });
-  }, [fullText, vp]);
+    showError({ kind: 'clipboard', message: t('bar.err.clipboard') });
+  }, [fullText, vp, t]);
 
   // idle 时什么都不渲染。窗口是透明的，不渲染就等于隐藏。
   // 但出错时即便已回到 idle 也要多停留几秒（errorHold），
@@ -366,7 +385,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
         {snap.notice && (
           <span style={styles.notice}>
             {snap.notice.message}
-            {snap.notice.attempt ? `（${snap.notice.attempt}/${snap.notice.maxAttempts} 次重试）` : ''}
+            {snap.notice.attempt
+              ? t('bar.retry', { attempt: snap.notice.attempt, max: snap.notice.maxAttempts })
+              : ''}
           </span>
         )}
       </div>
@@ -393,39 +414,22 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
               void vp.toggle();
             }}
           >
-            润色
+            {t('bar.polish')}
           </button>
           <button style={styles.button} onClick={copy} disabled={fullText.length === 0}>
-            复制
+            {t('bar.copy')}
           </button>
           <button style={styles.ghost} onClick={() => void vp.toggle()}>
-            关闭
+            {t('bar.close')}
           </button>
-          {snap.truncated && <span style={styles.warn}>收尾超时，已保留已识别内容</span>}
+          {snap.truncated && <span style={styles.warn}>{t('bar.truncated')}</span>}
         </div>
       )}
 
-      {copied && <div style={styles.hint}>已复制到剪贴板</div>}
+      {copied && <div style={styles.hint}>{t('bar.copied')}</div>}
     </div>
   );
 }
-
-const LABEL: Record<SessionState, string> = {
-  warming: '准备中',
-  listening: '聆听中',
-  draining: '收尾中',
-  reviewing: '已停止',
-  idle: '',
-};
-
-const ERROR_TEXT: Record<string, string> = {
-  mic: '麦克风不可用，请检查是否被其他程序占用',
-  clipboard: '复制失败，请重试',
-  network: '网络连接中断',
-  throttling: '服务繁忙，正在重试',
-  key: '未获取到授权，请联系管理员',
-  asr: '识别服务出错，已保留已识别内容',
-};
 
 const styles = {
   bar: {

@@ -1,6 +1,8 @@
 import { createRoot } from 'react-dom/client';
+import type { ReactNode } from 'react';
 import App from './App';
 import DiagPanel from './diag/DiagPanel';
+import { I18nProvider } from './i18n';
 
 const found = document.getElementById('root');
 if (!found) throw new Error('找不到 #root 挂载点');
@@ -17,6 +19,12 @@ const container: HTMLElement = found;
 // 什么都不发生，极难排查。
 const [route] = location.hash.replace(/^#/, '').split('?');
 
+// 统一挂载入口：除了 uitest（它自己跑断言，不挂 Provider）之外，
+// 所有渲染分支都包一层 I18nProvider，locale 随系统语言初始化并订阅变更。
+function render(node: ReactNode) {
+  createRoot(container).render(<I18nProvider>{node}</I18nProvider>);
+}
+
 async function boot() {
   if (route === 'uitest') {
     const { runUiTest } = await import('./uitest/run');
@@ -32,23 +40,23 @@ async function boot() {
 
   if (route === 'studio') {
     const { default: Studio } = await import('./studio/Studio');
-    createRoot(container).render(<Studio />);
+    render(<Studio />);
     return;
   }
 
   if (route === 'onboarding') {
     const { default: Onboarding } = await import('./onboarding/Onboarding');
-    createRoot(container).render(<Onboarding />);
+    render(<Onboarding />);
     return;
   }
 
   if (route === 'key-entry') {
     const { default: KeyEntry } = await import('./key-entry/KeyEntry');
-    createRoot(container).render(<KeyEntry />);
+    render(<KeyEntry />);
     return;
   }
 
-  createRoot(container).render(route === 'diag' ? <DiagPanel /> : <App />);
+  render(route === 'diag' ? <DiagPanel /> : <App />);
 }
 
 void boot();
