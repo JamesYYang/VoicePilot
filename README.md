@@ -101,6 +101,44 @@ VP_SM_SELFTEST=1 npx electron .           # 状态机自测
 
 ---
 
+## Key 下发（内网端点）
+
+打包版不再由人工分发 DashScope Key，改为**运行时从公司内网 HTTPS 端点取回**。试用者装完即用，不需要填任何东西。
+
+```bash
+# 1. 起服务端（部署在内网机器上，细节见 server/config-endpoint/README.md）
+cd <repo>
+export VP_CONFIG_TOKEN='<发给客户端的 token>'
+export VP_DASHSCOPE_API_KEY='sk-…'
+export VP_DASHSCOPE_WORKSPACE_ID='<业务空间 ID>'
+export VP_CONFIG_VERSION=1
+export VP_TLS_CERT=/etc/ssl/voicepilot/fullchain.pem
+export VP_TLS_KEY=/etc/ssl/voicepilot/privkey.pem
+node server/config-endpoint/server.js
+
+# 2. 打包前注入端点地址与 token（此文件 gitignore，绝不入库）
+cp app/electron/endpoint.example.json app/electron/endpoint.built.json
+# 填入真实 endpoint 与 token
+cd app && npm run dist:win:portable     # prepack-check 会拦住缺失/占位/非 https 的情况
+
+# 3. 轮换 Key
+#    改 VP_DASHSCOPE_API_KEY，并把 VP_CONFIG_VERSION 加一，重启服务端即可，不用重发包
+# 4. 轮换 token
+#    改 VP_CONFIG_TOKEN 之后**必须重新打包重发**（token 是打包时注入的）
+```
+
+**客户端行为**：启动时先读本地缓存（有就立刻可用，并在后台刷新）；没有任何可用凭据时才等一次端点（3 秒超时），失败则提示「未获取到授权，请联系管理员」+ 重试。托盘菜单有「重新获取授权」可手动重试，旁边还留着「设置 API Key」供管理员排查。
+
+**自测**：
+
+```bash
+cd app
+VP_CONFIG_SELFTEST=1 npx electron .   # 本地起 mock 端点，离线可跑
+node ../server/config-endpoint/test.mjs
+```
+
+---
+
 ## 打包与分发（给同事试用）
 
 ```bash

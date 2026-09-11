@@ -474,6 +474,18 @@ M1 的「通过」不含此项，M2 补齐。
 - 配置 schema 要做校验，服务端返回了损坏配置时回退到缓存，不能让 50 台机器同时启动不了
 - 未取到过任何配置（如首次安装且服务器不可达）时，走到 §5.8 的明确提示路径
 
+**2026-09-11 最小版契约（M5-A 已实施）**：M5-A 只做「拿 token 换 Key」这一件事，形态为
+`GET <endpoint>/config` + `X-VP-Token: <token>` → `200 {"version":n,"apiKey":"sk-…","workspaceId":"…"}`，
+`401 {"error":"unauthorized"}`。服务端是单文件 Node 原生 `http/https`（`server/config-endpoint/`），
+无数据库、无管理界面。客户端在启动时拉取，端点不可达则沿用本地缓存（`safeStorage` 加密）静默运行。
+
+token 是**打包时注入**的共享令牌（`app/electron/endpoint.built.json`，gitignore），
+因此**换 token 需要重新发包**；换 Key 只需改服务端环境变量并把 `VP_CONFIG_VERSION` 加一。
+下表要求的 HTTPS 与访问控制同样适用于最小版；限流、审计、版本化多环境配置留 M5-B。
+
+> ⚠️ 端点下发**不等于**对试用者保密（客户端仍持有 Key 明文），也**不替代**内网边界——
+> 完整的取舍见 `docs/superpowers/specs/2026-09-11-key-delivery-design.md` §0。
+
 ### 5.10 遥测、反馈与隐私（F10）
 
 这是内部试用的全部意义所在，必须做成功能，不能靠口头收集。
