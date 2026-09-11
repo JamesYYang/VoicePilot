@@ -16,6 +16,8 @@ export VP_PORT=8443
 node server/config-endpoint/server.js
 ```
 
+> **明文回退仅限本机。** 未设置 `VP_TLS_CERT` / `VP_TLS_KEY` 时，服务以裸 HTTP 启动且**只绑定 `127.0.0.1`**，仅同机前置网关可达。网关不在同一台机器上时**必须**配置证书——Key 明文过网不可接受，内网也不放宽。
+
 前台验证：
 
 ```bash
