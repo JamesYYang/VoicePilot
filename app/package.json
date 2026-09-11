@@ -11,9 +11,9 @@
     "hmr": "vite",
     "dev": "VP_DEV_URL=http://localhost:5173 electron .",
     "typecheck": "tsc --noEmit",
-    "dist:win": "vite build && electron-builder --win",
-    "dist:win:portable": "vite build && electron-builder --win portable",
-    "dist:mac": "vite build && electron-builder --mac"
+    "dist:win": "node scripts/prepack-check.mjs && vite build && electron-builder --win",
+    "dist:win:portable": "node scripts/prepack-check.mjs && vite build && electron-builder --win portable",
+    "dist:mac": "node scripts/prepack-check.mjs && vite build && electron-builder --mac"
   },
   "dependencies": {
     "opencc-js": "^1.4.2",

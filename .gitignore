@@ -3,6 +3,8 @@
 .env.local
 *.key
 *.pem
+# Key 端点下发的真值（token + 内网地址）。样例见 app/electron/endpoint.example.json
+app/electron/endpoint.built.json
 
 # ===== Node =====
 node_modules/
