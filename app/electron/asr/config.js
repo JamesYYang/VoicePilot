@@ -2,6 +2,8 @@ import { app, safeStorage } from 'electron';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { setMeta } from '../store.js';
+import { readEndpointConfig, fetchRemoteCredentials, ConfigEndpointError } from '../config-endpoint.js';
 
 /**
  * ASR 凭据的加载与保存。
@@ -108,3 +110,45 @@ export const ASR_PARAMETERS = {
 };
 
 export const ASR_MODEL = 'qwen-audio-3.0-asr-flash-streaming';
+
+/**
+ * 从端点取回凭据并写入本地缓存。
+ *
+ * 成功：safeStorage 落盘 + 把配置版本记进 meta（仅用于日志与统计，
+ * 客户端不做版本比较——每次 200 都覆盖）。
+ * 失败：返回 {ok:false, kind}，不抛——调用方决定要不要打扰用户。
+ *
+ * @param {{ endpointConfig?: object|null, timeoutMs?: number, fetchImpl?: Function }} [opts]
+ *   endpointConfig 传 null 表示「明确没有端点配置」；不传则读 endpoint.built.json。
+ */
+export async function refreshFromEndpoint(opts = {}) {
+  const config = opts.endpointConfig !== undefined ? opts.endpointConfig : readEndpointConfig();
+  try {
+    const creds = await fetchRemoteCredentials({ config, timeoutMs: opts.timeoutMs, fetchImpl: opts.fetchImpl });
+    saveCredentials(creds);
+    setMeta('config_version', creds.version);
+    console.log(`[授权] 已从端点取回凭据（version=${creds.version}）`);
+    return { ok: true, version: creds.version };
+  } catch (e) {
+    const kind = e instanceof ConfigEndpointError ? e.kind : 'bad-response';
+    console.warn(`[授权] 端点取回失败（${kind}）：${e?.message ?? e}`);
+    return { ok: false, kind, message: e?.message ?? String(e) };
+  }
+}
+
+/**
+ * 启动时决定「有没有可用凭据」。
+ *
+ * - 开发模式（.env）：直接可用，不碰端点
+ * - 有缓存：立刻可用，**后台**刷新（不 await，端点慢不影响启动）
+ * - 什么都没有：等一次端点（带超时）；失败则把 kind 交给调用方去提示
+ */
+export async function bootstrapCredentials(opts = {}) {
+  if (loadDevEnv()) return { ok: true, source: 'env' };
+  if (loadStored()) {
+    void refreshFromEndpoint(opts);
+    return { ok: true, source: 'cache' };
+  }
+  const r = await refreshFromEndpoint(opts);
+  return r.ok ? { ok: true, source: 'endpoint' } : { ok: false, kind: r.kind, message: r.message };
+}

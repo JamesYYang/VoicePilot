@@ -410,9 +410,11 @@ app.whenReady().then(async () => {
         ? './selftest/polish.js'
         : process.env.VP_STORE_SELFTEST
           ? './selftest/store.js'
-          : process.env.VP_I18N_SELFTEST
-            ? './selftest/i18n.js'
-            : null;
+            : process.env.VP_I18N_SELFTEST
+              ? './selftest/i18n.js'
+              : process.env.VP_CONFIG_SELFTEST
+                ? './selftest/config-endpoint.js'
+                : null;
 
   // 界面自测需要一个隐藏窗口来渲染，结果由 vp:uitest-result 回报（见 ipc.js）
   if (process.env.VP_UI_SELFTEST) {
@@ -422,7 +424,7 @@ app.whenReady().then(async () => {
 
   if (selftest) {
     const mod = await import(selftest);
-    const run = mod.runAsrSelftest ?? mod.runMachineSelftest ?? mod.runPolishSelftest ?? mod.runStoreSelftest ?? mod.runI18nSelftest;
+    const run = mod.runAsrSelftest ?? mod.runMachineSelftest ?? mod.runPolishSelftest ?? mod.runStoreSelftest ?? mod.runI18nSelftest ?? mod.runConfigSelftest;
     try {
       const r = await run();
       requestQuit(r.ok ? 0 : 1);
