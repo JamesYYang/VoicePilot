@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { t } from '../shared/i18n/index.js';
@@ -18,6 +18,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 let studioWin = null;
 
 export function createStudioWindow({ attachDevLogging }) {
+  if (process.platform === 'darwin') app.setActivationPolicy('regular');
   if (studioWin && !studioWin.isDestroyed()) {
     studioWin.focus();
     return studioWin;
@@ -45,6 +46,9 @@ export function createStudioWindow({ attachDevLogging }) {
   studioWin.loadURL('app://voicepilot/index.html#studio');
   studioWin.on('closed', () => {
     studioWin = null;
+    if (process.platform === 'darwin' && !BrowserWindow.getAllWindows().some((w) => w.isFocusable())) {
+      app.setActivationPolicy('accessory');
+    }
   });
   return studioWin;
 }

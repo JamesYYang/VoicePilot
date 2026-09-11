@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { t } from '../shared/i18n/index.js';
@@ -16,6 +16,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 let win = null;
 
 export function createKeyEntryWindow({ attachDevLogging }) {
+  if (process.platform === 'darwin') app.setActivationPolicy('regular');
   if (win && !win.isDestroyed()) {
     win.focus();
     return win;
@@ -42,6 +43,9 @@ export function createKeyEntryWindow({ attachDevLogging }) {
   win.loadURL('app://voicepilot/index.html#key-entry');
   win.on('closed', () => {
     win = null;
+    if (process.platform === 'darwin' && !BrowserWindow.getAllWindows().some((w) => w.isFocusable())) {
+      app.setActivationPolicy('accessory');
+    }
   });
   return win;
 }

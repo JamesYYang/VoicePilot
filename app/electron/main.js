@@ -9,8 +9,10 @@ import {
   protocol,
 } from 'electron';
 import { dirname, extname, join, resolve, sep } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import './tls-ca.js';
 import { registerIpc } from './ipc.js';
 import { createStudioWindow } from './studio.js';
 import { createOnboardingWindow } from './onboarding.js';
@@ -157,9 +159,15 @@ function createBar() {
     movable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
+    show: false,
+    fullscreenable: false,
+    hiddenInMissionControl: true,
+    acceptFirstMouse: true,
 
     // 关键：窗口不可聚焦。这是「不抢焦点」的第一道保证。
     focusable: false,
+    // macOS：NSPanel + Nonactivating，否则快捷键会把本应用激活，前台输入框丢焦点。
+    ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
 
     webPreferences: {
       // 必须是 .cjs。Electron 的沙箱 preload 一律按 CommonJS 加载，不认
@@ -174,10 +182,9 @@ function createBar() {
   });
 
   if (process.platform === 'darwin') {
-    // macOS：出现在所有桌面空间（含全屏应用之上），且不进 Dock。
+    // macOS：出现在所有桌面空间（含全屏应用之上）。不进 Dock 靠 accessory 策略。
     // 辅助功能权限未授予时全局快捷键不生效 —— 引导见 PRD §5.7 / F12。
     bar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    app.dock?.hide();
   } else {
     // Windows：screen-saver 级别高于普通 alwaysOnTop，能盖住多数全屏应用。
     // 注意这个 level 在 macOS 上无效，两边必须分开处理。
@@ -196,6 +203,7 @@ function createBar() {
 
   attachDevLogging(bar);
 
+  bar.once('ready-to-show', () => bar.showInactive());
   loadRenderer(bar);
 }
 
@@ -241,6 +249,7 @@ function loadRenderer(win) {
  * 所以保留在主应用里，而不是另起一个 spike 工程。
  */
 function createDiagWindow() {
+  if (process.platform === 'darwin') app.setActivationPolicy('regular');
   if (diag && !diag.isDestroyed()) {
     diag.focus();
     return;
@@ -271,6 +280,9 @@ function createDiagWindow() {
   diag.loadURL(`app://voicepilot/index.html${hash}`);
   diag.on('closed', () => {
     diag = null;
+    if (process.platform === 'darwin' && !BrowserWindow.getAllWindows().some((w) => w.isFocusable())) {
+      app.setActivationPolicy('accessory');
+    }
   });
 }
 
@@ -321,10 +333,40 @@ function rebuildTray() {
   );
 }
 
+function loadTrayImage() {
+  // Windows 托盘吃 .ico；macOS 菜单栏不认 .ico，空图就等于没托盘。
+  const file = process.platform === 'darwin' ? 'voicepilot-icon-56.png' : 'voicepilot-icon.ico';
+  const p = join(HERE, '..', 'build', file);
+  let img = nativeImage.createFromPath(p);
+  if (img.isEmpty()) {
+    try {
+      img = nativeImage.createFromBuffer(readFileSync(p));
+    } catch {
+      img = nativeImage.createEmpty();
+    }
+  }
+  // 菜单栏约 18pt。56px 原图不缩放会被裁成一角，看起来像撑满却只露一小块。
+  if (process.platform === 'darwin' && !img.isEmpty()) {
+    const trayIcon = nativeImage.createEmpty();
+    trayIcon.addRepresentation({
+      scaleFactor: 1,
+      width: 18,
+      height: 18,
+      buffer: img.resize({ width: 18, height: 18 }).toPNG(),
+    });
+    trayIcon.addRepresentation({
+      scaleFactor: 2,
+      width: 36,
+      height: 36,
+      buffer: img.resize({ width: 36, height: 36 }).toPNG(),
+    });
+    return trayIcon;
+  }
+  return img;
+}
+
 function createTray() {
-  // Windows 托盘吃 .ico（多尺寸内嵌，会按 DPI 自动挑）；macOS 等拿到 Mac 后再单独做 template 图。
-  const trayIcon = nativeImage.createFromPath(join(HERE, '..', 'build', 'voicepilot-icon.ico'));
-  tray = new Tray(trayIcon.isEmpty() ? nativeImage.createEmpty() : trayIcon);
+  tray = new Tray(loadTrayImage());
   rebuildTray();
 }
 
@@ -397,17 +439,22 @@ app.whenReady().then(async () => {
 
   // 无 API Key 时弹输入窗（打包版没有 .env，靠这里拿 Key；开发期有 .env 则不会弹）。
   // 将来 F11 配置端点落地后，hasCredentials 会因端点下发而为 true，此窗自然不再出现。
-  if (!hasCredentials()) {
+  const needKey = !hasCredentials();
+  const needOnboard = getMeta('first_run_done') !== 'true';
+  if (process.platform === 'darwin') {
+    // accessory：快捷键/托盘不把本应用变成前台，焦点留在用户正在打字的程序。
+    app.setActivationPolicy(needKey || needOnboard ? 'regular' : 'accessory');
+  }
+  if (needKey) {
     createKeyEntryWindow({ attachDevLogging });
   }
 
   // 首次启动引导窗（F8）—— 欢迎页：快捷键 + 权限提示。首次启动弹一次，之后不再弹。
-  if (getMeta('first_run_done') !== 'true') {
+  if (needOnboard) {
     createOnboardingWindow({ attachDevLogging });
   }
 
-  // M1 阶段要反复跑采集诊断，而托盘图标还是空图（createTray 里的 TODO），
-  // 小到几乎点不中。开发时用 VP_OPEN_DIAG=1 直接把诊断窗口开出来。
+  // 开发时用 VP_OPEN_DIAG=1 直接把诊断窗口开出来。
   // 给毫秒数则自动跑一轮：VP_OPEN_DIAG=180000 采集 3 分钟后自动停止并导出。
   if (process.env.VP_OPEN_DIAG) createDiagWindow();
 

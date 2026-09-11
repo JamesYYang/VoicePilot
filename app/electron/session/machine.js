@@ -166,8 +166,12 @@ export class SessionMachine {
     try {
       await session.start();
     } catch (e) {
-      // start() 内部失败（握手/超时/task-failed）都落到这里
-      this.#onSessionError({ kind: 'network', code: 'START_FAILED', message: e.message });
+      const message = e?.message ?? String(e);
+      this.#onSessionError({
+        kind: e?.kind ?? (/401|403|unauthorized/i.test(message) ? 'key' : 'network'),
+        code: 'START_FAILED',
+        message,
+      });
       return;
     }
 

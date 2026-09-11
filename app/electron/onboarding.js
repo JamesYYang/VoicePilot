@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setMeta } from './store.js';
@@ -14,6 +14,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 let win = null;
 
 export function createOnboardingWindow({ attachDevLogging }) {
+  if (process.platform === 'darwin') app.setActivationPolicy('regular');
   if (win && !win.isDestroyed()) {
     win.focus();
     return win;
@@ -41,6 +42,9 @@ export function createOnboardingWindow({ attachDevLogging }) {
   win.on('closed', () => {
     setMeta('first_run_done', 'true');
     win = null;
+    if (process.platform === 'darwin' && !BrowserWindow.getAllWindows().some((w) => w.isFocusable())) {
+      app.setActivationPolicy('accessory');
+    }
   });
   return win;
 }

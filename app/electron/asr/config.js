@@ -34,10 +34,16 @@ function loadDevEnv() {
   } catch {
     return null;
   }
-  const apiKey = process.env.DASHSCOPE_API_KEY;
-  const workspaceId = process.env.DASHSCOPE_WORKSPACE_ID;
-  if (!apiKey || !workspaceId) return null;
-  return { apiKey, workspaceId };
+  return normalizeCreds(process.env.DASHSCOPE_API_KEY, process.env.DASHSCOPE_WORKSPACE_ID);
+}
+
+function normalizeCreds(apiKey, workspaceId) {
+  const key = String(apiKey ?? '').trim();
+  const ws = String(workspaceId ?? '').trim();
+  if (!key || !ws) return null;
+  // 打包版用另一套钥匙串解密，解出来不是 sk- 就当没配（否则阿里云回 401）。
+  if (!key.startsWith('sk-')) return null;
+  return { apiKey: key, workspaceId: ws };
 }
 
 /** 持久化：从 userData/credentials.json 读（safeStorage 加密）。失败返回 null。 */
@@ -47,9 +53,7 @@ function loadStored() {
     const apiKey = safeStorage.isEncryptionAvailable()
       ? safeStorage.decryptString(Buffer.from(j.apiKey, 'base64'))
       : j.apiKey; // 加密不可用的极少数环境（如无 keyring 的 Linux）明文兜底
-    const workspaceId = j.workspaceId;
-    if (!apiKey || !workspaceId) return null;
-    return { apiKey, workspaceId };
+    return normalizeCreds(apiKey, j.workspaceId);
   } catch {
     return null;
   }
@@ -62,10 +66,12 @@ export function hasCredentials() {
 
 /** 保存凭据到 userData。Key 经 safeStorage 加密，workspaceId 不敏感、明文存。 */
 export function saveCredentials({ apiKey, workspaceId }) {
+  const creds = normalizeCreds(apiKey, workspaceId);
+  if (!creds) throw new Error('API Key 须以 sk- 开头，且工作空间 ID 不能为空');
   const encrypted = safeStorage.isEncryptionAvailable()
-    ? safeStorage.encryptString(apiKey).toString('base64')
-    : apiKey;
-  writeFileSync(keyFilePath(), JSON.stringify({ apiKey: encrypted, workspaceId }), 'utf8');
+    ? safeStorage.encryptString(creds.apiKey).toString('base64')
+    : creds.apiKey;
+  writeFileSync(keyFilePath(), JSON.stringify({ apiKey: encrypted, workspaceId: creds.workspaceId }), 'utf8');
 }
 
 /**

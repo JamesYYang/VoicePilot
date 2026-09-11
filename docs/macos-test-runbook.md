@@ -114,3 +114,31 @@ npm start
 - **快捷键没反应**：`⌥Space` 需要辅助功能权限，手动去「隐私与安全性 → 辅助功能」勾上。
 - **端到端没字 / 报 key 相关错**：`.env` 没配或字段填错（`DASHSCOPE_WORKSPACE_ID` 是业务空间 ID，不是 API Key）。
 - **蓝牙耳机延迟明显**：这本身就是要抓的现象，把两轮 JSON 都贴回来即可，不用现场判断。
+
+---
+
+## 七、打包版真机踩坑（2026-09-11 补记）
+
+打包 `VoicePilot.app` 并真机跑通后，补记三个**只在打包版出现、开发模式（`npm start`）不复现**的问题。改 macOS 相关代码前先看这里，别重复踩。
+
+### 1. 打包后托盘图标看不到
+
+macOS 的 `Tray` **不认 `.ico`**，拿到空图就等于没有托盘。现已在 `app/electron/main.js` 的 `loadTrayImage()` 里按平台分流：macOS 用 `build/voicepilot-icon-56.png` 缩成 18pt / 36pt（@1x/@2x）两个表示。
+
+> 遗留：用的是彩色 logo，未设 template 图，深色菜单栏下对比度可能不足。
+
+### 2. 唤出悬浮条后前台应用丢焦点，关掉也找不回
+
+**这不是回归，是打包才暴露。** 开发模式从终端起的是 `Electron.app`、前台本来就是它，所以看不出问题；打包成 `VoicePilot.app` 从 Finder 启动后，快捷键唤出悬浮条会把本应用激活，前台输入框随即丢焦点。
+
+修法（见代码，结论见 PRD §5.6 的 2026-09-11 更正）：悬浮条 `type:'panel'` + `focusable:false`，并用 `app.setActivationPolicy` 在 `'accessory'`（空闲）与 `'regular'`（有可聚焦窗口时）之间切换。
+
+### 3. 公司内网走代理时证书校验失败
+
+报错形如 `UNABLE_TO_VERIFY_LEAF_SIGNATURE`。原因是**内网网关用公司 CA 重签了阿里云证书**，而 Node 的 `ws` / `fetch` 默认只认 Mozilla 捆绑 CA，不读系统信任库。
+
+修法：`app/electron/tls-ca.js` 把系统已信任的 CA 并入默认列表（**保留证书校验，不要改成 `rejectUnauthorized:false`**）；`session.js` 建连时显式传 `ca`；`app/package.json` 的 `LSEnvironment` 里另有 `NODE_USE_SYSTEM_CA=1` 兜底。
+
+**换机器仍报证书错时**：先确认公司根证书已装进系统钥匙串并被信任——在 Electron 里 `tls.getCACertificates('system')` 非空即说明读到了（本机实测：默认 118 个，并入系统后 200 个）。
+
+> 顺带一提：打包版没有 `.env`，首次启动会弹「设置 API Key」窗。开发模式存下的 Key 在打包版**解不出来**（走的是另一套钥匙串条目），需要重填一次。

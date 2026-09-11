@@ -390,7 +390,9 @@ M1 的「通过」不含此项，M2 补齐。
 
 两个平台都需要 `setIgnoreMouseEvents(true)` 让鼠标点击穿透，鼠标移入悬浮条时临时关闭穿透（否则按钮点不到）。
 
-**macOS 实测（2026-09-09）**：Electron 层 `focusable:false` + `setVisibleOnAllWorkspaces` + `app.dock.hide()` 已足够，未用 `NSPanel` 原生方案；端到端实测不抢焦点成立。上表 macOS 列的 `NSPanel` / `NSNonactivatingPanelMask` 属「预留方案，实测不需要」。
+**macOS 实测（2026-09-09，开发模式）**：Electron 层 `focusable:false` + `setVisibleOnAllWorkspaces` + `app.dock.hide()` 已足够，未用 `NSPanel` 原生方案；端到端实测不抢焦点成立。
+
+> ⚠️ **2026-09-11 更正（打包版）**：上面的「`NSPanel` 不需要」**只在开发模式（`npm start`，从终端起 `Electron.app`）成立**——那种场景前台本来就是本应用。打包成 `VoicePilot.app` 从 Finder 启动后，快捷键唤出悬浮条会把本应用激活，前台输入框丢焦点、关掉悬浮条也找不回。最终实现仍回到本表 macOS 列：悬浮条窗口 `type:'panel'`（即 `NSPanel`）+ `focusable:false`，并配合 `app.setActivationPolicy`：空闲时 `'accessory'`（不进 Dock、快捷键/托盘不激活本应用），有可聚焦窗口（studio / key-entry / onboarding / diag）时临时 `'regular'`，窗口关闭后回退。悬浮条创建用 `show:false` + `ready-to-show` 时 `showInactive()`，避免创建瞬间抢激活。因此本表 macOS 列应视为**已落地**，而非「预留」。凡 macOS 焦点/激活类结论，必须注明是开发模式还是打包 `.app`。
 
 ### 5.7 权限、签名与内部分发
 

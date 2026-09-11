@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { ASR_MODEL, ASR_PARAMETERS } from './config.js';
+import { ensureSystemCa } from '../tls-ca.js';
 
 /**
  * 百炼实时语音识别的一次会话。跑在**主进程**——API Key 只在这里出现，
@@ -35,7 +36,7 @@ function classifyError(code = '', message = '') {
   const s = `${code} ${message}`;
   if (/throttl|rate.?quota|429|too.?many/i.test(s)) return 'throttling';
   if (/401|403|unauthorized|forbidden|invalid.?api.?key/i.test(s)) return 'key';
-  if (/enotfound|econnrefused|etimedout|econnreset|eai_again|network/i.test(s)) return 'network';
+  if (/enotfound|econnrefused|etimedout|econnreset|eai_again|network|unable_to_verify|cert/i.test(s)) return 'network';
   return 'asr';
 }
 
@@ -109,12 +110,14 @@ export class AsrSession {
     this.#state = 'starting';
     this.#taskId = randomUUID();
 
+    const ca = ensureSystemCa();
     const ws = new WebSocket(`wss://${this.#workspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`, {
       headers: {
         Authorization: `Bearer ${this.#apiKey}`,
         'X-DashScope-WorkSpace': this.#workspaceId,
         'user-agent': 'voicepilot-desktop/0.1',
       },
+      ...(ca ? { ca } : {}),
     });
     this.#ws = ws;
 

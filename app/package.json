@@ -52,7 +52,14 @@
       "target": ["dir", "dmg"],
       "identity": null,
       "icon": "build/voicepilot-icon-512.png",
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "VoicePilot 需要使用麦克风进行语音识别",
+        "NSAudioCaptureUsageDescription": "VoicePilot 需要使用麦克风进行语音识别",
+        "LSEnvironment": {
+          "NODE_USE_SYSTEM_CA": "1"
+        }
+      }
     },
     "nsis": {
       "oneClick": false,

@@ -1,5 +1,6 @@
 import { loadCredentials } from '../asr/config.js';
 import { buildPolishMessages } from './prompt.js';
+import '../tls-ca.js';
 
 const MODEL = 'deepseek-v4-pro-0813';
 

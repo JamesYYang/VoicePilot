@@ -133,8 +133,6 @@ contextBridge.exposeInMainWorld('voicepilot', {
 
   /**
    * 退出应用。
-   * 托盘图标目前还是空图（见 main.js 的 createTray），点不中菜单里的「退出」，
-   * 没有这个口子就只能靠任务管理器杀进程。
    */
   quit() {
     ipcRenderer.send('vp:quit');
