@@ -26,15 +26,21 @@ function keyFilePath() {
   return join(app.getPath('userData'), 'credentials.json');
 }
 
-/** 开发期：从仓库根 .env 读。打包版禁走这条路；不存在或字段不全返回 null。 */
+/**
+ * 开发期：从仓库根 .env 或直接导出的环境变量读。打包版禁走这条路。
+ *
+ * .env 存在则先加载它——Node 的 loadEnvFile 不覆盖已存在的同名 process.env 变量，
+ * 故真机临时换 key 直接 export 即可。.env 不存在或加载失败也不影响：仍会用
+ * process.env 里的 DASHSCOPE_API_KEY / DASHSCOPE_WORKSPACE_ID 求值。
+ * 无论如何都走到 normalizeCreds 判断；字段不全返回 null。
+ */
 function loadDevEnv() {
   if (app.isPackaged) return null;
   try {
     // Node 20.12+。Electron 44 内置 Node 22，可用。
-    // 已存在于 process.env 的同名变量不会被覆盖 —— 真机临时换 key 直接 export 即可。
     process.loadEnvFile(ENV_PATH);
   } catch {
-    return null;
+    // .env 缺失/不可读：吞掉即可，继续用 process.env 求值。
   }
   return normalizeCreds(process.env.DASHSCOPE_API_KEY, process.env.DASHSCOPE_WORKSPACE_ID);
 }

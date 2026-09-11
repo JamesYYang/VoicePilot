@@ -176,7 +176,9 @@ export async function runConfigSelftest() {
   // 后台那次刷新仍挂在 cacheHang 上，不 kick 掉连接会挂死。
   await cacheHang.close();
 
-  // ---- 13. 成功分支：.env 命中 → source:'env'，根本不碰端点 ----
+  // ---- 13. 成功分支：环境变量命中 → source:'env'，根本不碰端点 ----
+  // 用例直接设置 process.env，不依赖仓库根存在 .env：loadDevEnv 在 .env 缺失时
+  // 也会用 process.env 求值，故新克隆/CI 上同样成立。
   process.env.DASHSCOPE_API_KEY = 'sk-env-dummy';
   process.env.DASHSCOPE_WORKSPACE_ID = 'ws-env';
   const spy13 = makeSpyFetch();
