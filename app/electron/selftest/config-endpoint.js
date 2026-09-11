@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { app } from 'electron';
 import { openStore, getMeta } from '../store.js';
-import { ConfigEndpointError, fetchRemoteCredentials, readEndpointConfig } from '../config-endpoint.js';
 import { bootstrapCredentials, loadCredentials, refreshFromEndpoint } from '../asr/config.js';
 
 /** 起一个只回固定响应的 mock 端点，返回 {url, close}。 */
@@ -26,10 +25,39 @@ function startMock(handler) {
   });
 }
 
-const json = (status, body) => (_req, res) => {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(body));
+/**
+ * 造一个 mock 处理器：先校验请求形状（方法 GET、路径 /config、X-VP-Token 匹配），
+ * 任一不符直接回 400。这样「方法不是 GET」「路径不是 /config」「请求头缺失/写错」
+ * 任一契约回归都会让用例变红，而不是被 mock 无声吞掉。
+ */
+const respond = (status, rawBody, { token = 't', contentType = 'application/json' } = {}) => (req, res) => {
+  const shapeOk = req.method === 'GET' && req.url === '/config' && req.headers['x-vp-token'] === token;
+  if (!shapeOk) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'bad request shape' }));
+    return;
+  }
+  res.writeHead(status, { 'Content-Type': contentType });
+  res.end(rawBody);
 };
+
+/** 契约端点以 /config 暴露（Task 1 交付），mock 用它拼接完整 URL。 */
+const json = (status, body, opts) => respond(status, JSON.stringify(body), opts);
+
+/**
+ * 造一个「一旦被调用就记录并抛错」的假 fetch。
+ * 用于证明坏端点/缺端点在发请求之前就被拦下——回环外的明文绝不能被尝试。
+ */
+function makeSpyFetch() {
+  const spy = {
+    called: false,
+    impl: async () => {
+      spy.called = true;
+      throw new Error('不应发出请求');
+    },
+  };
+  return spy;
+}
 
 export async function runConfigSelftest() {
   console.log('[自测] Key 端点下发（config-endpoint）');
@@ -49,8 +77,9 @@ export async function runConfigSelftest() {
   const check = (name, cond) => results.push([name, cond]);
 
   // ---- 1. 200 且字段合法 → 写缓存 + 落 config_version ----
+  // endpoint 拼上 /config：mock 会校验路径，走错直接 400。
   const okMock = await startMock(json(200, { version: 7, apiKey: 'sk-abc', workspaceId: 'ws-1' }));
-  const r1 = await refreshFromEndpoint({ endpointConfig: { endpoint: okMock.url, token: 't' } });
+  const r1 = await refreshFromEndpoint({ endpointConfig: { endpoint: `${okMock.url}/config`, token: 't' } });
   check('200 成功', r1.ok === true && r1.version === 7);
   check('200 落盘', loadCredentials().apiKey === 'sk-abc');
   check('200 记版本', getMeta('config_version') === '7');
@@ -58,35 +87,70 @@ export async function runConfigSelftest() {
 
   // ---- 2. 401 → unauthorized，不写缓存 ----
   const srv401 = await startMock(json(401, { error: 'unauthorized' }));
-  const r2 = await refreshFromEndpoint({ endpointConfig: { endpoint: srv401.url, token: 't' } });
+  const r2 = await refreshFromEndpoint({ endpointConfig: { endpoint: `${srv401.url}/config`, token: 't' } });
   check('401 归类', r2.ok === false && r2.kind === 'unauthorized');
   check('401 不覆盖缓存', loadCredentials().apiKey === 'sk-abc');
   await srv401.close();
 
   // ---- 3. 连不上 → network；已有缓存时 loadCredentials 仍返回旧值 ----
-  const r3 = await refreshFromEndpoint({ endpointConfig: { endpoint: 'http://127.0.0.1:1', token: 't' } });
+  const r3 = await refreshFromEndpoint({ endpointConfig: { endpoint: 'http://127.0.0.1:1/config', token: 't' } });
   check('连不上归类', r3.ok === false && r3.kind === 'network');
   check('失败仍用缓存', loadCredentials().apiKey === 'sk-abc');
 
   // ---- 4. 无缓存 + 端点失败 → bootstrap 返回 false，且带 kind ----
   rmSync(join(dir, 'credentials.json'), { force: true });
-  const b4 = await bootstrapCredentials({ endpointConfig: { endpoint: 'http://127.0.0.1:1', token: 't' } });
+  const b4 = await bootstrapCredentials({ endpointConfig: { endpoint: 'http://127.0.0.1:1/config', token: 't' } });
   check('无缓存+失败', b4.ok === false && b4.kind === 'network');
 
   // ---- 5. 200 但字段不合法 → bad-response，不写缓存 ----
   const badMock = await startMock(json(200, { version: 1, apiKey: 'nope', workspaceId: 'ws-1' }));
-  const r5 = await refreshFromEndpoint({ endpointConfig: { endpoint: badMock.url, token: 't' } });
+  const r5 = await refreshFromEndpoint({ endpointConfig: { endpoint: `${badMock.url}/config`, token: 't' } });
   check('字段不合法归类', r5.ok === false && r5.kind === 'bad-response');
   await badMock.close();
 
   // ---- 6. 超时注入（mock 不响应）→ network ----
   const hangMock = await startMock(() => {});
   const r6 = await refreshFromEndpoint({
-    endpointConfig: { endpoint: hangMock.url, token: 't' },
+    endpointConfig: { endpoint: `${hangMock.url}/config`, token: 't' },
     timeoutMs: 150,
   });
   check('超时归类', r6.ok === false && r6.kind === 'network');
   await hangMock.close();
+
+  // ---- 7. 核心安全不变量：http 非回环 → bad-response，且根本不发请求 ----
+  // 注入 spy fetch：若 isAllowedScheme 放宽到「任意 http」，spy 会被调用、用例变红；
+  // 同时确保坏端点绝不会把 Key 明文发向回环之外。
+  const spy7 = makeSpyFetch();
+  const r7 = await refreshFromEndpoint({
+    endpointConfig: { endpoint: 'http://10.0.0.1/config', token: 't' },
+    fetchImpl: spy7.impl,
+  });
+  check('非回环 http 归类', r7.ok === false && r7.kind === 'bad-response');
+  check('非回环 http 不发请求', spy7.called === false);
+
+  // ---- 8. 端点配置缺失 → bad-response，且不发请求 ----
+  const spy8 = makeSpyFetch();
+  const r8 = await refreshFromEndpoint({ endpointConfig: null, fetchImpl: spy8.impl });
+  check('缺端点配置归类', r8.ok === false && r8.kind === 'bad-response');
+  check('缺端点配置不发请求', spy8.called === false);
+
+  // ---- 9. mock 返回 404 → bad-response ----
+  const srv404 = await startMock(json(404, { error: 'not_found' }));
+  const r9 = await refreshFromEndpoint({ endpointConfig: { endpoint: `${srv404.url}/config`, token: 't' } });
+  check('404 归类', r9.ok === false && r9.kind === 'bad-response');
+  await srv404.close();
+
+  // ---- 10. mock 返回 500 → bad-response ----
+  const srv500 = await startMock(json(500, { error: 'boom' }));
+  const r10 = await refreshFromEndpoint({ endpointConfig: { endpoint: `${srv500.url}/config`, token: 't' } });
+  check('500 归类', r10.ok === false && r10.kind === 'bad-response');
+  await srv500.close();
+
+  // ---- 11. 200 但 body 不是合法 JSON → bad-response ----
+  const notJsonMock = await startMock(respond(200, 'not json', { contentType: 'text/plain' }));
+  const r11 = await refreshFromEndpoint({ endpointConfig: { endpoint: `${notJsonMock.url}/config`, token: 't' } });
+  check('非 JSON 归类', r11.ok === false && r11.kind === 'bad-response');
+  await notJsonMock.close();
 
   rmSync(dir, { recursive: true, force: true });
 
