@@ -81,6 +81,14 @@ export const zhCN = {
   'key.saving': '保存中…',
   'key.save': '保存',
   'key.emptyError': 'API Key 和工作空间 ID 都不能为空',
+  'key.invalidError': 'API Key 须以 sk- 开头，且工作空间 ID 不能为空',
+  // 授权（端点下发）
+  'auth.title': '授权',
+  'auth.error.network': '未获取到授权，请联系管理员',
+  'auth.error.unauthorized': '授权已失效，请联系管理员',
+  'auth.error.badResponse': '授权信息异常，请联系管理员',
+  'auth.retry': '重试',
+  'auth.close': '关闭',
   // 会话错误（主进程）
   'machine.busy': '服务繁忙',
   'machine.disconnected': '连接中断',
@@ -88,6 +96,7 @@ export const zhCN = {
   // 托盘
   'tray.openMain': '打开主应用',
   'tray.diag': '采集诊断（M1）',
+  'tray.refreshAuth': '重新获取授权',
   'tray.setKey': '设置 API Key',
   'tray.quit': '退出',
   // 窗口标题

@@ -61,11 +61,6 @@ function loadStored() {
   }
 }
 
-/** 是否有可用凭据（.env 或持久化 store）。用于启动时决定要不要弹输入窗。 */
-export function hasCredentials() {
-  return !!(loadDevEnv() ?? loadStored());
-}
-
 /** 保存凭据到 userData。Key 经 safeStorage 加密，workspaceId 不敏感、明文存。 */
 export function saveCredentials({ apiKey, workspaceId }) {
   const creds = normalizeCreds(apiKey, workspaceId);

@@ -7,6 +7,7 @@ import {
   screen,
   nativeImage,
   protocol,
+  dialog,
 } from 'electron';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -17,7 +18,7 @@ import { registerIpc } from './ipc.js';
 import { createStudioWindow } from './studio.js';
 import { createOnboardingWindow } from './onboarding.js';
 import { createKeyEntryWindow } from './key-entry.js';
-import { hasCredentials } from './asr/config.js';
+import { bootstrapCredentials, refreshFromEndpoint } from './asr/config.js';
 import { getMeta } from './store.js';
 import { t } from '../shared/i18n/index.js';
 import { getCurrentLocale } from './locale.js';
@@ -327,6 +328,7 @@ function rebuildTray() {
       { label: t(locale, 'tray.diag'), click: () => createDiagWindow() },
       { type: 'separator' },
       { label: t(locale, 'tray.setKey'), click: () => createKeyEntryWindow({ attachDevLogging }) },
+      { label: t(locale, 'tray.refreshAuth'), click: () => void refreshAuthFromTray() },
       { type: 'separator' },
       { label: t(locale, 'tray.quit'), click: () => requestQuit() },
     ])
@@ -368,6 +370,46 @@ function loadTrayImage() {
 function createTray() {
   tray = new Tray(loadTrayImage());
   rebuildTray();
+}
+
+/** 把错误类别翻成人话。三类文案都在 i18n 里，不在这里拼中文。 */
+function authErrorMessage(kind) {
+  const locale = getCurrentLocale();
+  if (kind === 'unauthorized') return t(locale, 'auth.error.unauthorized');
+  if (kind === 'bad-response') return t(locale, 'auth.error.badResponse');
+  return t(locale, 'auth.error.network');
+}
+
+/**
+ * 弹「提示 + 重试」。
+ *
+ * 先按已知原因显示（initialKind 来自启动时那次失败，避免再等一轮超时），
+ * 只有用户点「重试」才真的再请求一次。
+ */
+async function promptAuthRetry(initialKind) {
+  const locale = getCurrentLocale();
+  let kind = initialKind ?? 'network';
+  for (;;) {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: t(locale, 'auth.title'),
+      message: authErrorMessage(kind),
+      buttons: [t(locale, 'auth.retry'), t(locale, 'auth.close')],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) return;
+    const r = await refreshFromEndpoint();
+    if (r.ok) return;
+    kind = r.kind;
+  }
+}
+
+/** 托盘手动刷新：成功静默（只打日志），失败才提示。 */
+async function refreshAuthFromTray() {
+  const r = await refreshFromEndpoint();
+  if (r.ok) return;
+  void promptAuthRetry(r.kind);
 }
 
 function registerShortcuts(machine) {
@@ -439,16 +481,18 @@ app.whenReady().then(async () => {
   createTray();
   registerShortcuts(machine);
 
-  // 无 API Key 时弹输入窗（打包版没有 .env，靠这里拿 Key；开发期有 .env 则不会弹）。
-  // 将来 F11 配置端点落地后，hasCredentials 会因端点下发而为 true，此窗自然不再出现。
-  const needKey = !hasCredentials();
+  // 凭据来源：.env（仅开发）→ 本地缓存 → 内网端点。开发期有 .env 时上面两步都不碰端点。
+  const boot = await bootstrapCredentials();
+  const needKey = !boot.ok;
   const needOnboard = getMeta('first_run_done') !== 'true';
   if (process.platform === 'darwin') {
     // accessory：快捷键/托盘不把本应用变成前台，焦点留在用户正在打字的程序。
     app.setActivationPolicy(needKey || needOnboard ? 'regular' : 'accessory');
   }
   if (needKey) {
-    createKeyEntryWindow({ attachDevLogging });
+    // 试用者手里没有 Key，给表单没有意义——给一句明确原因 + 重试。
+    console.log(`[授权] 启动时无可用凭据（${boot.kind}）`);
+    void promptAuthRetry(boot.kind);
   }
 
   // 首次启动引导窗（F8）—— 欢迎页：快捷键 + 权限提示。首次启动弹一次，之后不再弹。

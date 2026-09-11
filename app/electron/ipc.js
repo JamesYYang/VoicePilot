@@ -254,8 +254,14 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
   ipcMain.handle('vp:key/save', (_e, { apiKey, workspaceId }) => {
     const key = String(apiKey ?? '').trim();
     const ws = String(workspaceId ?? '').trim();
-    if (!key || !ws) throw new Error('API Key 和工作空间 ID 不能为空');
-    saveCredentials({ apiKey: key, workspaceId: ws });
+    const locale = getCurrentLocale();
+    if (!key || !ws) throw new Error(t(locale, 'key.emptyError'));
+    try {
+      saveCredentials({ apiKey: key, workspaceId: ws });
+    } catch {
+      // 只可能是 normalizeCreds 判不合法；具体原因不暴露给渲染进程
+      throw new Error(t(locale, 'key.invalidError'));
+    }
     return true;
   });
 
