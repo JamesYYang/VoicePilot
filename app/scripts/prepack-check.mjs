@@ -32,8 +32,29 @@ if (problems.length === 0) {
   } else {
     const endpoint = String(j.endpoint ?? '').trim();
     const token = String(j.token ?? '').trim();
-    if (!endpoint) problems.push('endpoint 为空');
-    else if (!endpoint.startsWith('https://')) problems.push(`endpoint 必须是 https:// —— 当前：${endpoint}`);
+    if (!endpoint) {
+      problems.push('endpoint 为空');
+    } else if (!endpoint.startsWith('https://')) {
+      problems.push(`endpoint 必须是 https:// —— 当前：${endpoint}`);
+    } else {
+      // endpoint 是**完整 URL**（本身即 .../config），客户端原样 fetch、不做任何路径拼接。
+      // 所以这里必须验「能解析 + 有主机名 + 路径以 /config 结尾」：只查 https:// 前缀
+      // 会让 https://host（漏了 /config，等于按 base 地址填）溜过检查，装到客户端后
+      // 每台机器都 404、全部弹「授权信息异常」——正是打包前就该拦下的那类包。
+      let u = null;
+      try {
+        u = new URL(endpoint);
+      } catch {
+        u = null;
+      }
+      if (!u) problems.push(`endpoint 不是合法 URL —— 当前：${endpoint}`);
+      else if (!u.hostname) problems.push(`endpoint 缺少主机名 —— 当前：${endpoint}`);
+      else if (!u.pathname.endsWith('/config')) {
+        problems.push(
+          `endpoint 的路径必须以 /config 结尾（endpoint 是完整 URL，不是 base 地址，客户端不会补 /config）—— 当前：${endpoint}`
+        );
+      }
+    }
     if (!token) problems.push('token 为空');
     else if (token === 'REPLACE_ME') problems.push('token 仍是样例里的占位值 REPLACE_ME');
   }
@@ -43,7 +64,7 @@ if (problems.length) {
   console.error(
     '[打包前置检查] 未通过：\n' +
       problems.map((p) => `  - ${p}`).join('\n') +
-      '\n修复：把 app/electron/endpoint.example.json 复制为 app/electron/endpoint.built.json，填入真实的端点地址与 token。'
+      '\n修复：把 app/electron/endpoint.example.json 复制为 app/electron/endpoint.built.json，填入真实 token 与**完整端点 URL**（含 /config，例如 https://host/config，客户端不会替你补路径）。'
   );
   process.exit(1);
 }

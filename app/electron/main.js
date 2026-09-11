@@ -465,9 +465,11 @@ app.whenReady().then(async () => {
   }
 
   if (selftest) {
-    const mod = await import(selftest);
-    const run = mod.runAsrSelftest ?? mod.runMachineSelftest ?? mod.runPolishSelftest ?? mod.runStoreSelftest ?? mod.runI18nSelftest ?? mod.runConfigSelftest;
+    // import 也必须放进 try：模块加载失败若无人接住这个 rejected promise，
+    // 进程会一直挂着——既不退出也不给非零码，违背「无人值守 + 退出码」的自测契约。
     try {
+      const mod = await import(selftest);
+      const run = mod.runAsrSelftest ?? mod.runMachineSelftest ?? mod.runPolishSelftest ?? mod.runStoreSelftest ?? mod.runI18nSelftest ?? mod.runConfigSelftest;
       const r = await run();
       requestQuit(r.ok ? 0 : 1);
     } catch (e) {
@@ -484,6 +486,8 @@ app.whenReady().then(async () => {
   // 凭据来源：.env（仅开发）→ 本地缓存 → 内网端点。开发期有 .env 时上面两步都不碰端点。
   const boot = await bootstrapCredentials();
   const needKey = !boot.ok;
+  // 明确打出凭据来源（env/cache/endpoint）：试用期靠这行日志判断「这台机器到底有没有真的从端点取到 Key」。
+  if (boot.ok) console.log(`[授权] 凭据来源=${boot.source}`);
   const needOnboard = getMeta('first_run_done') !== 'true';
   if (process.platform === 'darwin') {
     // accessory：快捷键/托盘不把本应用变成前台，焦点留在用户正在打字的程序。

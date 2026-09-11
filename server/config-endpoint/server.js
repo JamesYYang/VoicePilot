@@ -40,6 +40,18 @@ export function createRequestHandler({ token, apiKey, workspaceId, version }) {
 }
 
 /**
+ * 把环境变量按整数读，且**空串等同未设置**回落到默认值。
+ *
+ * 不能直接 `Number(env.X ?? default)`：`'' ?? default` 仍是 `''`，`Number('')` 得 0，
+ * 于是 VP_CONFIG_VERSION='' 静默变成 version 0、VP_PORT='' 变成 0（listen(0) 绑随机端口——
+ * 服务「启动成功」但客户端永远连不上）。空串是「没填」，不是「填了 0」。
+ */
+function readIntEnv(env, name, fallback) {
+  const raw = String(env[name] ?? '').trim();
+  return raw === '' ? fallback : Number(raw);
+}
+
+/**
  * 读取并校验环境变量。**无副作用**：不打印、不退出，因此自测可在进程内直接调用。
  * 成功返回 { ok: true, config }；失败返回 { ok: false, problems }，由调用方决定如何处理。
  */
@@ -54,13 +66,15 @@ export function readEnv(env = process.env) {
 
   // 必须显式校验为整数：否则 JSON.stringify 会把 NaN 写成 null，破坏 version:<int> 契约；
   // port 为 NaN 还会让 listen() 抛出未处理的 ERR_SOCKET_BAD_PORT。
-  const version = Number(env.VP_CONFIG_VERSION ?? 1);
+  const version = readIntEnv(env, 'VP_CONFIG_VERSION', 1);
   if (!Number.isInteger(version)) {
     problems.push(`VP_CONFIG_VERSION 必须是整数：${env.VP_CONFIG_VERSION}`);
   }
-  const port = Number(env.VP_PORT ?? 8443);
-  if (!Number.isInteger(port)) {
-    problems.push(`VP_PORT 必须是整数：${env.VP_PORT}`);
+  // port 除了整数还要在合法区间内：listen(-1) 会抛未捕获的 ERR_SOCKET_BAD_PORT 让进程崩掉，
+  // 与其崩在 listen 里，不如在这里并入 problems 由 main() 打印后干净退出。
+  const port = readIntEnv(env, 'VP_PORT', 8443);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    problems.push(`VP_PORT 必须是 1–65535 的整数：${env.VP_PORT}`);
   }
 
   if (problems.length) return { ok: false, problems };

@@ -6,13 +6,18 @@ import { app } from 'electron';
 import { openStore, getMeta } from '../store.js';
 import { bootstrapCredentials, loadCredentials, refreshFromEndpoint } from '../asr/config.js';
 
-/** 起一个只回固定响应的 mock 端点，返回 {url, close}。 */
-function startMock(handler) {
+/**
+ * 起一个只回固定响应的 mock 端点，返回 {url, port, close}。
+ * host 传 null 时不指定绑定地址（监听所有回环），供 localhost 用例使用——
+ * 只绑 127.0.0.1 时 `localhost` 若解析到 ::1 会连不上，导致用例假红。
+ */
+function startMock(handler, host = '127.0.0.1') {
   return new Promise((resolve) => {
     const srv = createServer(handler);
-    srv.listen(0, '127.0.0.1', () => {
+    const onListen = () =>
       resolve({
         url: `http://127.0.0.1:${srv.address().port}`,
+        port: srv.address().port,
         // closeAllConnections 必须先踢掉挂起的连接（超时那条用例会留一个），
         // 否则 srv.close 会一直等下去，自测挂死在最后一步。
         close: () =>
@@ -21,7 +26,8 @@ function startMock(handler) {
             srv.close(r);
           }),
       });
-    });
+    if (host) srv.listen(0, host, onListen);
+    else srv.listen(0, onListen);
   });
 }
 
@@ -151,6 +157,50 @@ export async function runConfigSelftest() {
   const r11 = await refreshFromEndpoint({ endpointConfig: { endpoint: `${notJsonMock.url}/config`, token: 't' } });
   check('非 JSON 归类', r11.ok === false && r11.kind === 'bad-response');
   await notJsonMock.close();
+
+  // ---- 12. 成功分支（核心设计行为）：有缓存 → 立刻返回 source:'cache'，不 await 端点 ----
+  // 先用一次成功刷新把缓存写进去。
+  const seedMock = await startMock(json(200, { version: 9, apiKey: 'sk-cache', workspaceId: 'ws-c' }));
+  await refreshFromEndpoint({ endpointConfig: { endpoint: `${seedMock.url}/config`, token: 't' } });
+  await seedMock.close();
+  // 再拿一个**永不响应**的端点调 bootstrap：若它 await 了端点，3s 超时前绝不会返回。
+  const cacheHang = await startMock(() => {});
+  const cacheT0 = Date.now();
+  const b12 = await bootstrapCredentials({
+    endpointConfig: { endpoint: `${cacheHang.url}/config`, token: 't' },
+    timeoutMs: 3000,
+  });
+  const cacheElapsed = Date.now() - cacheT0;
+  check('缓存命中成功', b12.ok === true && b12.source === 'cache');
+  check('缓存不阻塞启动', cacheElapsed < 500);
+  // 后台那次刷新仍挂在 cacheHang 上，不 kick 掉连接会挂死。
+  await cacheHang.close();
+
+  // ---- 13. 成功分支：.env 命中 → source:'env'，根本不碰端点 ----
+  process.env.DASHSCOPE_API_KEY = 'sk-env-dummy';
+  process.env.DASHSCOPE_WORKSPACE_ID = 'ws-env';
+  const spy13 = makeSpyFetch();
+  const b13 = await bootstrapCredentials({
+    endpointConfig: { endpoint: 'http://127.0.0.1:1/config', token: 't' },
+    fetchImpl: spy13.impl,
+  });
+  check('.env 命中来源', b13.ok === true && b13.source === 'env');
+  check('.env 命中不碰端点', spy13.called === false);
+  // 恢复本文件原有的屏蔽状态（.env 真值不得泄漏进后续用例）。
+  process.env.DASHSCOPE_API_KEY = '';
+  process.env.DASHSCOPE_WORKSPACE_ID = '';
+
+  // ---- 14. isAllowedScheme 的 localhost 分支：http://localhost 回环应被放行 ----
+  // 现有用例只覆盖 127.0.0.1 与「非回环 http 被拒」，删掉 localhost 子分支不会变红。
+  const localMock = await startMock(
+    json(200, { version: 1, apiKey: 'sk-local', workspaceId: 'ws-l' }),
+    null
+  );
+  const r14 = await refreshFromEndpoint({
+    endpointConfig: { endpoint: `http://localhost:${localMock.port}/config`, token: 't' },
+  });
+  check('localhost 放行', r14.ok === true);
+  await localMock.close();
 
   rmSync(dir, { recursive: true, force: true });
 

@@ -118,8 +118,9 @@ node server/config-endpoint/server.js
 
 # 2. 打包前注入端点地址与 token（此文件 gitignore，绝不入库）
 cp app/electron/endpoint.example.json app/electron/endpoint.built.json
-# 填入真实 endpoint 与 token
-cd app && npm run dist:win:portable     # prepack-check 会拦住缺失/占位/非 https 的情况
+# 填入真实 token 与**完整端点 URL**（endpoint 字段含 /config，如 https://host/config；
+# 客户端原样请求、不会补路径，写成 https://host 会导致每台机器 404）
+cd app && npm run dist:win:portable     # prepack-check 会拦住缺失/占位/非 https/URL 形态不对的情况
 
 # 3. 轮换 Key
 #    改 VP_DASHSCOPE_API_KEY，并把 VP_CONFIG_VERSION 加一，重启服务端即可，不用重发包
@@ -127,7 +128,7 @@ cd app && npm run dist:win:portable     # prepack-check 会拦住缺失/占位/�
 #    改 VP_CONFIG_TOKEN 之后**必须重新打包重发**（token 是打包时注入的）
 ```
 
-**客户端行为**：启动时先读本地缓存（有就立刻可用，并在后台刷新）；没有任何可用凭据时才等一次端点（3 秒超时），失败则提示「未获取到授权，请联系管理员」+ 重试。托盘菜单有「重新获取授权」可手动重试，旁边还留着「设置 API Key」供管理员排查。
+**客户端行为**：启动时先读本地缓存（有就立刻可用，并在后台刷新）；没有任何可用凭据时才等一次端点（3 秒超时），失败则提示「未获取到授权，请联系管理员」+ 重试。托盘菜单有「重新获取授权」可手动重试，旁边还留着「设置 API Key」供管理员排查。⚠️ **托盘「设置 API Key」手填的值会在下次启动被端点值覆盖**（设计上每次成功取回都覆盖缓存），所以它只适合临时排查，不是长期配置手段。
 
 **自测**：
 

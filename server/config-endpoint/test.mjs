@@ -67,7 +67,20 @@ const badPort = readEnv({ ...validEnv, VP_PORT: 'garbage' });
 assert.equal(badPort.ok, false);
 assert.ok(badPort.problems.some((p) => p.includes('VP_PORT')));
 
+// 空串必须按「未设置」回落到默认值，而不是 Number('')=0（会把服务绑到随机端口/version 0）
+const emptyDefaults = readEnv({ ...validEnv, VP_CONFIG_VERSION: '', VP_PORT: '' });
+assert.equal(emptyDefaults.ok, true);
+assert.equal(emptyDefaults.config.version, 1);
+assert.equal(emptyDefaults.config.port, 8443);
+
+// port 越界 → ok:false（否则 listen(-1)/listen(70000) 抛未捕获的 ERR_SOCKET_BAD_PORT）
+for (const bad of ['0', '70000', '-1']) {
+  const r = readEnv({ ...validEnv, VP_PORT: bad });
+  assert.equal(r.ok, false, `VP_PORT=${bad} 应判定为非法`);
+  assert.ok(r.problems.some((p) => p.includes('VP_PORT')));
+}
+
 // fetch 默认 keep-alive，close() 不会销毁空闲 socket，必须先销毁再等回调，否则进程挂死。
 srv.closeAllConnections?.();
 await new Promise((r) => srv.close(r));
-console.log('[服务端自测] 通过：200 / 401（错+缺）/ 404（路径+方法）/ 禁缓存 / readEnv 校验');
+console.log('[服务端自测] 通过：200 / 401（错+缺）/ 404（路径+方法）/ 禁缓存 / readEnv（整数校验 + 空串默认值 + port 区间）');

@@ -58,13 +58,18 @@
 ## 2. 端点契约
 
 ```
-GET <endpoint>/config
+GET <endpoint>          ← endpoint 字段本身即完整 URL（…/config），客户端原样请求，不做任何路径拼接
 X-VP-Token: <token>
 
 200 → {"version": 3, "apiKey": "sk-…", "workspaceId": "…"}
 401 → {"error": "unauthorized"}
 5xx / 其他 → 客户端按 bad-response 处理
 ```
+
+> **`endpoint` 是完整 URL，不是 base 地址。** 客户端直接把该字段当作请求目标
+> （`fetch(config.endpoint)`），**不会**再拼 `/config`。所以配置里必须写
+> `https://host/config` 这种带路径的完整地址，写成 `https://host` 会让每台客户端 404。
+> `prepack-check.mjs` 会在打包前校验「可解析 + 有主机名 + pathname 以 `/config` 结尾」，拦住这类包。
 
 - `version`：**单调递增整数**（配置版本）。客户端把它记进 SQLite `meta` 表的 `config_version`，**只用于日志与统计**（「还有多少台机器在用哪个版本的 Key」）——客户端**不做版本比较**，每次 200 都覆盖缓存，省掉一套 diff 逻辑。
 - 服务端从**自己的环境变量**读 Key（`VP_DASHSCOPE_API_KEY` / `VP_DASHSCOPE_WORKSPACE_ID` / `VP_CONFIG_TOKEN`），不落盘、不进代码。
@@ -115,10 +120,12 @@ bootstrapCredentials()
 { "endpoint": "https://voicepilot.example.internal/config", "token": "REPLACE_ME" }
 ```
 
+> 注意 `endpoint` 是**完整 URL**（含 `/config`），不是 base 地址——客户端不做路径拼接，见 §2。
+
 打包流程：
 
 1. 人工/CI 把真实值写进 `app/electron/endpoint.built.json`（同结构，**gitignore**）
-2. `npm run dist:*` 先跑 `prepack-check.mjs`——文件缺失、字段为空、或 token 仍是 `REPLACE_ME` 都直接失败并打印怎么修
+2. `npm run dist:*` 先跑 `prepack-check.mjs`——文件缺失、字段为空、token 仍是 `REPLACE_ME`、或 `endpoint` 不是 `https://` 完整 URL（不可解析 / 无主机名 / 路径不以 `/config` 结尾）都直接失败并打印怎么修
 3. `files` 已含 `electron/**/*`，该文件随包进 `app.asar`
 
 开发模式不读它（`.env` 优先级更高），因此本地开发无需这个文件。

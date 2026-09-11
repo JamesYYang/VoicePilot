@@ -1,4 +1,4 @@
-import { t, resolveLocale, isLocale, LOCALES } from '../../shared/i18n/index.js';
+import { t, resolveLocale, isLocale, LOCALES, DICTS } from '../../shared/i18n/index.js';
 import { getCurrentLocale, setCurrentLocale } from '../locale.js';
 import { openStore, getMeta } from '../store.js';
 import { toTraditional } from '../i18n/zh-convert.js';
@@ -17,8 +17,14 @@ export async function runI18nSelftest() {
     resolveLocale('ja') === 'en-US' &&
     resolveLocale(null) === 'en-US';
   const okIs = isLocale('zh-CN') && !isLocale('ja') && !isLocale(3);
-  const okSameKeys = new Set(LOCALES.map((l) => Object.keys(t(l, '__x')).length)).size <= 1;
-  const ok = okT && okParams && okMissing && okResolve && okIs;
+  // 直接取三本字典的 key 集合比较。旧实现用 Object.keys(t(l, '__x'))——缺 key 时 t 返回
+  // key 字符串本身，Object.keys('__x') 恒为 ['0','1','2']，等于从没比过任何东西。
+  // 这里逐 locale 建 Set，要求「大小相等且互含」，才能发现「数量相同但 key 不同」的漂移。
+  const keySets = LOCALES.map((l) => new Set(Object.keys(DICTS[l])));
+  const okSameKeys = keySets.every(
+    (s) => s.size === keySets[0].size && [...s].every((k) => keySets[0].has(k))
+  );
+  const ok = okT && okParams && okMissing && okResolve && okIs && okSameKeys;
 
   // locale 单一真源 + 持久化（vp:lang/set → setCurrentLocale → setMeta）
   openStore(':memory:');
@@ -33,6 +39,6 @@ export async function runI18nSelftest() {
   const okNoop = (await toTraditional('我们在讨论语音输入')) === '我们在讨论语音输入';
 
   const okAll = ok && okPersist && okReject && okZh && okNoop;
-  console.log(`[自测] ${okAll ? '通过' : '失败'} t=${okT} 占位=${okParams} 缺key=${okMissing} 映射=${okResolve} isLocale=${okIs} 持久化=${okPersist} 非法拒绝=${okReject} 简繁=${okZh} 非TW原样=${okNoop}`);
+  console.log(`[自测] ${okAll ? '通过' : '失败'} t=${okT} 占位=${okParams} 缺key=${okMissing} 映射=${okResolve} isLocale=${okIs} 三语同key=${okSameKeys} 持久化=${okPersist} 非法拒绝=${okReject} 简繁=${okZh} 非TW原样=${okNoop}`);
   return { ok: okAll };
 }

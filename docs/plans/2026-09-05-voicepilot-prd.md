@@ -475,8 +475,10 @@ M1 的「通过」不含此项，M2 补齐。
 - 未取到过任何配置（如首次安装且服务器不可达）时，走到 §5.8 的明确提示路径
 
 **2026-09-11 最小版契约（M5-A 已实施）**：M5-A 只做「拿 token 换 Key」这一件事，形态为
-`GET <endpoint>/config` + `X-VP-Token: <token>` → `200 {"version":n,"apiKey":"sk-…","workspaceId":"…"}`，
-`401 {"error":"unauthorized"}`。服务端是单文件 Node 原生 `http/https`（`server/config-endpoint/`），
+`GET <endpoint>` + `X-VP-Token: <token>` → `200 {"version":n,"apiKey":"sk-…","workspaceId":"…"}`，
+`401 {"error":"unauthorized"}`。其中 **`endpoint` 字段是完整 URL（本身即 `…/config`），客户端原样请求、不做任何路径拼接**——
+配置须写 `https://host/config`，写成 `https://host` 会导致每台客户端 404。
+服务端是单文件 Node 原生 `http/https`（`server/config-endpoint/`），
 无数据库、无管理界面。客户端在启动时拉取，端点不可达则沿用本地缓存（`safeStorage` 加密）静默运行。
 
 token 是**打包时注入**的共享令牌（`app/electron/endpoint.built.json`，gitignore），
