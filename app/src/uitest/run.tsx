@@ -3,7 +3,6 @@ import App from '../App';
 import Studio from '../studio/Studio';
 import SettingsView from '../studio/SettingsView';
 import { I18nProvider } from '../i18n';
-import { ParagraphSegmenter, breakThresholdMs, median } from '../segment/segmenter';
 import { acceleratorFromEvent } from '../studio/shortcutKeys';
 
 /**
@@ -181,8 +180,10 @@ export async function runUiTest() {
   check('草稿是灰字（有 draft 节点）', container.querySelector('span[style*="156"]') !== null ||
     textEl?.innerHTML.includes('9ca3af') === true);
 
-  // ---- 5. 定稿 + 自适应分段 ----
-  // 先连说几句，句间都是 300ms 短停顿（快语速节奏），不该分段
+  // ---- 5. 定稿 + 每句一行 ----
+  // 新规则：每个定稿句单独一行，不再看句间停顿长短（原「按停顿分自然段」
+  // 判据已证伪：阈值是中位数 × 2.5，正常说话永远不会触发）。这里刻意连说
+  // 几句、句间都是 300ms 短停顿，仍然必须逐句换行。
   fire('partial', {
     recvAtMs: Date.now(),
     text: '今天我们要讨论三件事',
@@ -216,22 +217,23 @@ export async function runUiTest() {
     committedEl?.textContent?.includes('第一件是采集') === true &&
     committedEl?.textContent?.includes('第二件是识别') === true,
     JSON.stringify(committedEl?.textContent));
-  // 300ms 短停顿不触发分段：固定阈值对慢语速会误切，这里验快语速正常不分段
-  check('短停顿 300ms 不分段', committedEl?.textContent?.includes('\n') === false,
+  // 每个定稿句单独一行，与停顿长短无关
+  check('每个定稿句单独一行',
+    committedEl?.textContent?.includes('今天我们要讨论三件事\n第一件是采集\n第二件是识别') === true,
     JSON.stringify(committedEl?.textContent));
 
-  // 一次明显长于自身节奏的停顿（2000ms）→ 才另起一段
+  // 再定稿一句，同样另起一行 —— 换行位置在第三件之前
   fire('partial', {
     recvAtMs: Date.now(),
     text: '第三件是润色',
     sentenceEnd: true,
     sentenceId: 's4',
-    beginTime: 5300, // 与上句末尾隔 2000ms，远超自身节奏 → 分段
+    beginTime: 5300,
     endTime: 6200,
     words: [],
   });
   await flush();
-  check('长停顿 2000ms 触发分段，且换行在第三件之前',
+  check('下一句定稿后另起一行，换行在第三件之前',
     committedEl?.textContent?.includes('第二件是识别\n第三件是润色') === true,
     JSON.stringify(committedEl?.textContent));
 
@@ -512,73 +514,6 @@ export async function runUiTest() {
     okEnNav,
     JSON.stringify(enNavLabels())
   );
-
-  // ---- 20. 分段判据（源无关）----
-  check('median 偶数个取中间两数平均', median([1, 2, 3, 4]) === 2.5);
-  check('median 空数组为 0', median([]) === 0);
-  check('阈值下限 1200ms 生效', breakThresholdMs([10, 10, 10]) === 1200);
-
-  {
-    // 服务端时间戳路径。注意自适应阈值的基线效应：必须先积累几句短停顿，
-    // 让中位数待在低位、阈值被 1200ms 下限兜住；否则单个大 gap 会把中位数
-    // （连同阈值）一起抬高，反而不会分段 —— 这是既有设计，不是 bug。
-    const seg = new ParagraphSegmenter();
-    const final = (beginTime: number, endTime: number, recvAtMs: number) => ({
-      sentenceEnd: true, beginTime, endTime, recvAtMs,
-    });
-    const mid = (beginTime: number | null, recvAtMs: number) => ({
-      sentenceEnd: false, beginTime, endTime: null, recvAtMs,
-    });
-    check('首句不分段', seg.offer(final(0, 500, 1000))?.paraBreak === false);
-    seg.offer(mid(600, 1100));
-    check('短停顿 200ms 不分段', seg.offer(final(700, 1200, 1300))?.paraBreak === false);
-    seg.offer(mid(1300, 1400));
-    check('短停顿 200ms 仍不分段', seg.offer(final(1400, 1900, 1500))?.paraBreak === false);
-    seg.offer(mid(3900, 2000));
-    check('长停顿 2000ms 触发分段', seg.offer(final(3900, 4400, 2100))?.paraBreak === true);
-  }
-
-  {
-    // 无服务端时间戳：退化用本地接收时间差（上一句定稿到达 → 下一句首个中间结果到达）
-    const seg = new ParagraphSegmenter();
-    const final = (recvAtMs: number) => ({
-      sentenceEnd: true, beginTime: null, endTime: null, recvAtMs,
-    });
-    const mid = (recvAtMs: number) => ({
-      sentenceEnd: false, beginTime: null, endTime: null, recvAtMs,
-    });
-    check('无时间戳：首句不分段', seg.offer(final(1500))?.paraBreak === false);
-    seg.offer(mid(1700));
-    check('无时间戳：本地 gap 200ms 不分段', seg.offer(final(2000))?.paraBreak === false);
-    seg.offer(mid(2200));
-    check('无时间戳：本地 gap 200ms 仍不分段', seg.offer(final(2500))?.paraBreak === false);
-    seg.offer(mid(4500));
-    check('无时间戳：本地 gap 2000ms 触发分段', seg.offer(final(5000))?.paraBreak === true);
-  }
-
-  {
-    // reset 必须真的清空 gap 窗口。做法：先把窗口喂成大间隔（把中位数抬到 5000、
-    // 阈值 12500），reset 后重喂短间隔再给一个 2000ms 间隔。
-    // 若 reset 是空实现，历史大间隔会把中位数留在 2000（阈值 5000），
-    // 那个 2000ms 间隔就触发不了分段 —— 断言失败。空实现能骗过的版本没有意义。
-    const seg = new ParagraphSegmenter();
-    const f = (beginTime: number, endTime: number, recvAtMs: number) => ({
-      sentenceEnd: true, beginTime, endTime, recvAtMs,
-    });
-    seg.offer(f(0, 1000, 1));
-    seg.offer(f(6000, 7000, 2));    // gap 5000
-    seg.offer(f(12000, 13000, 3));  // gap 5000
-    seg.offer(f(18000, 19000, 4));  // gap 5000 → gaps=[5000,5000,5000]
-
-    seg.reset();
-
-    seg.offer(f(0, 1000, 5));       // reset 后首句
-    seg.offer(f(1200, 2200, 6));    // gap 200
-    seg.offer(f(2400, 3400, 7));    // gap 200
-    seg.offer(f(3600, 4600, 8));    // gap 200 → gaps=[200,200,200]
-    const after = seg.offer(f(6600, 7600, 9)); // gap 2000 → 阈值 1200，应分段
-    check('reset 真的清空了 gap 窗口', after?.paraBreak === true, JSON.stringify(after));
-  }
 
   // ---- 21. 设置页快捷键 ----
   const settingsContainer = document.createElement('div');

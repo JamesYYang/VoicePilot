@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { CaptureEngine } from './audio/capture';
 import { useT } from './i18n';
-import { ParagraphSegmenter } from './segment/segmenter';
 
 /**
  * 悬浮条（PRD §4.1 / §5.6）。
@@ -18,7 +17,7 @@ import { ParagraphSegmenter } from './segment/segmenter';
  *
  * 文本模型沿用浏览器原型里已验证过的那套：committed[] 存定稿句、draft 存
  * 当前草稿，渲染时把 draft 追加在最后一段末尾。定稿与草稿的区分来自服务端
- * 的 sentence_end，分段判据见 ./segment/segmenter。
+ * 的 sentence_end：每个定稿句单独一行。
  */
 
 /** 未确认帧数的上限。超了就丢新帧，防止 IPC 队列无界增长（A8） */
@@ -56,8 +55,6 @@ interface Partial {
   sentenceEnd: boolean;
   beginTime: number | null;
   endTime: number | null;
-  /** 事件到达渲染进程的本地时间（主进程在 WS 收到时打点） */
-  recvAtMs: number;
 }
 
 interface Committed {
@@ -114,7 +111,6 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   const droppedRef = useRef(0);
   const historySavedRef = useRef(false);
   const historyIdRef = useRef<number | null>(null);
-  const segmenterRef = useRef(new ParagraphSegmenter());
 
   const captureRef = useRef<{ start: () => Promise<void>; stop: () => Promise<void> } | null>(null);
   const errorTimerRef = useRef<number | null>(null);
@@ -179,21 +175,14 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     });
     const offPartial = vp.onPartial((p: Partial) => {
       if (p.sentenceEnd) {
-        const r = segmenterRef.current.offer({
-          sentenceEnd: true,
-          beginTime: p.beginTime,
-          endTime: p.endTime,
-          recvAtMs: p.recvAtMs,
-        });
-        setCommitted((prev) => [...prev, { text: p.text, paraBreak: r?.paraBreak === true }]);
+        // 每个定稿句单独一行（原「按停顿分自然段」判据已证伪：阈值是
+        // 中位数 × 2.5，正常说话永远不会触发，且头 3 句不可能分段）。
+        setCommitted((prev) => [
+          ...prev,
+          { text: p.text, paraBreak: prev.length > 0 },
+        ]);
         setDraft('');
       } else {
-        segmenterRef.current.offer({
-          sentenceEnd: false,
-          beginTime: p.beginTime,
-          endTime: p.endTime,
-          recvAtMs: p.recvAtMs,
-        });
         setDraft(p.text);
       }
     });
@@ -251,7 +240,6 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       cumSamplesRef.current = 0;
       ackedSeqRef.current = 0;
       droppedRef.current = 0;
-      segmenterRef.current.reset();
       historySavedRef.current = false;
       historyIdRef.current = null;
 

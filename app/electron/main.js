@@ -20,7 +20,7 @@ import { createOnboardingWindow } from './onboarding.js';
 import { createKeyEntryWindow } from './key-entry.js';
 import { bootstrapCredentials, refreshFromEndpoint } from './asr/config.js';
 import { getMeta } from './store.js';
-import { applyShortcut, currentAccel, defaultAccel } from './shortcut.js';
+import { applyShortcut, currentAccel } from './shortcut.js';
 import { t } from '../shared/i18n/index.js';
 import { getCurrentLocale } from './locale.js';
 
