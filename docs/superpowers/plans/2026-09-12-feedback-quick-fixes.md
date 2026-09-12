@@ -444,22 +444,27 @@ git commit -m "feat(polish): 润色模型换成 deepseek-v4-flash-0731（速度�
 
 - [ ] **Step 1: 先写失败断言**
 
-在 `app/electron/selftest/store.js` 末尾（`return { ok, total, failed }` 之前）追加：
+⚠️ `app/electron/selftest/store.js` **不使用** `check()` 助手（那是 `selftest/machine.js` 的模式），而是把一串布尔量 `okXxx` 汇总进末尾的 `const ok = ...`。照它自己的既有模式加，别引入 `check`。
+
+在该文件顶部 import 列表（`migrateDefaultScene` 之后）加入 `getShortcut, setShortcut`。
+
+在末尾 `const ok = okSeed && okWrite && ...` 这一行**之前**插入：
 
 ```js
-  // 快捷键读写：未设置返回 null，设置后可读回，覆盖写生效
+  // 快捷键读写：未设置返回 null；设置后可读回；覆盖写生效
+  const okShortcutDefault = getShortcut() === null;
   setShortcut('CommandOrControl+Alt+Space');
-  check('setShortcut 后可读回', getShortcut() === 'CommandOrControl+Alt+Space');
+  const okShortcutSet = getShortcut() === 'CommandOrControl+Alt+Space';
   setShortcut('CommandOrControl+Shift+K');
-  check('setShortcut 覆盖写生效', getShortcut() === 'CommandOrControl+Shift+K');
+  const okShortcutOverwrite = getShortcut() === 'CommandOrControl+Shift+K';
 ```
 
-并在该文件顶部 import 行加入 `getShortcut, setShortcut`。
+然后把布尔量接进汇总：`const ok = ... && okShortcutDefault && okShortcutSet && okShortcutOverwrite;`，并在下面那行 `console.log(\`[自测] ...\`)` 的尾部追加一段 `` 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite} ``。
 
 - [ ] **Step 2: 运行，确认失败**
 
 Run: `cd app && VP_STORE_SELFTEST=1 npx electron .`
-Expected: FAIL（`getShortcut is not a function`）→ 退出码非 0
+Expected: 退出码非 0（导入未导出的 `getShortcut` 会得到 `undefined`，调用即抛错；`main.js` 的 selftest 分支接住后 `requestQuit(1)`）
 
 - [ ] **Step 3: 实现**
 
