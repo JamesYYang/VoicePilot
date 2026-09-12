@@ -122,9 +122,9 @@ import { ParagraphSegmenter, breakThresholdMs, median } from '../segment/segment
   check('阈值下限 1200ms 生效', breakThresholdMs([10, 10, 10]) === 1200);
 
   {
-    // 服务端时间戳路径。注意自适应阈值的基线效应：必须先积累两句短停顿
-    // （median 变小 → 阈值降下来），后面的长停顿才会被判为分段。单个大 gap
-    // 会把 median 一起抬高，不会分段 —— 这是既有设计，不是 bug。
+    // 服务端时间戳路径。注意自适应阈值的基线效应：必须先积累几句短停顿，
+    // 让中位数待在低位、阈值被 1200ms 下限兜住；否则单个大 gap 会把中位数
+    // （连同阈值）一起抬高，反而不会分段 —— 这是既有设计，不是 bug。
     const seg = new ParagraphSegmenter();
     const final = (beginTime: number, endTime: number, recvAtMs: number) => ({
       sentenceEnd: true, beginTime, endTime, recvAtMs,
@@ -160,12 +160,27 @@ import { ParagraphSegmenter, breakThresholdMs, median } from '../segment/segment
   }
 
   {
-    // reset 后回到初始态：不会因为历史 gap 而误判
+    // reset 必须真的清空 gap 窗口。做法：先把窗口喂成大间隔（把中位数抬到 5000、
+    // 阈值 12500），reset 后重喂短间隔再给一个 2000ms 间隔。
+    // 若 reset 是空实现，历史大间隔会把中位数留在 2000（阈值 5000），
+    // 那个 2000ms 间隔就触发不了分段 —— 断言失败。空实现能骗过的版本没有意义。
     const seg = new ParagraphSegmenter();
-    seg.offer({ sentenceEnd: true, beginTime: 0, endTime: 100, recvAtMs: 100 });
+    const f = (beginTime: number, endTime: number, recvAtMs: number) => ({
+      sentenceEnd: true, beginTime, endTime, recvAtMs,
+    });
+    seg.offer(f(0, 1000, 1));
+    seg.offer(f(6000, 7000, 2));    // gap 5000
+    seg.offer(f(12000, 13000, 3));  // gap 5000
+    seg.offer(f(18000, 19000, 4));  // gap 5000 → gaps=[5000,5000,5000]
+
     seg.reset();
-    const after = seg.offer({ sentenceEnd: true, beginTime: 0, endTime: 100, recvAtMs: 200 });
-    check('reset 后首句不分段', after?.paraBreak === false);
+
+    seg.offer(f(0, 1000, 5));       // reset 后首句
+    seg.offer(f(1200, 2200, 6));    // gap 200
+    seg.offer(f(2400, 3400, 7));    // gap 200
+    seg.offer(f(3600, 4600, 8));    // gap 200 → gaps=[200,200,200]
+    const after = seg.offer(f(6600, 7600, 9)); // gap 2000 → 阈值 1200，应分段
+    check('reset 真的清空了 gap 窗口', after?.paraBreak === true, JSON.stringify(after));
   }
 ```
 
