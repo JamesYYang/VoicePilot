@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import App from '../App';
 import Studio from '../studio/Studio';
 import { I18nProvider } from '../i18n';
+import { ParagraphSegmenter, breakThresholdMs, median } from '../segment/segmenter';
 
 /**
  * 悬浮条界面自测。用法：
@@ -509,6 +510,58 @@ export async function runUiTest() {
     okEnNav,
     JSON.stringify(enNavLabels())
   );
+
+  // ---- 20. 分段判据（源无关）----
+  check('median 偶数个取中间两数平均', median([1, 2, 3, 4]) === 2.5);
+  check('median 空数组为 0', median([]) === 0);
+  check('阈值下限 1200ms 生效', breakThresholdMs([10, 10, 10]) === 1200);
+
+  {
+    // 服务端时间戳路径。注意自适应阈值的基线效应：必须先积累两句短停顿
+    // （median 变小 → 阈值降下来），后面的长停顿才会被判为分段。单个大 gap
+    // 会把 median 一起抬高，不会分段 —— 这是既有设计，不是 bug。
+    const seg = new ParagraphSegmenter();
+    const final = (beginTime: number, endTime: number, recvAtMs: number) => ({
+      sentenceEnd: true, beginTime, endTime, recvAtMs,
+    });
+    const mid = (beginTime: number | null, recvAtMs: number) => ({
+      sentenceEnd: false, beginTime, endTime: null, recvAtMs,
+    });
+    check('首句不分段', seg.offer(final(0, 500, 1000))?.paraBreak === false);
+    seg.offer(mid(600, 1100));
+    check('短停顿 200ms 不分段', seg.offer(final(700, 1200, 1300))?.paraBreak === false);
+    seg.offer(mid(1300, 1400));
+    check('短停顿 200ms 仍不分段', seg.offer(final(1400, 1900, 1500))?.paraBreak === false);
+    seg.offer(mid(3900, 2000));
+    check('长停顿 2000ms 触发分段', seg.offer(final(3900, 4400, 2100))?.paraBreak === true);
+  }
+
+  {
+    // 无服务端时间戳：退化用本地接收时间差（上一句定稿到达 → 下一句首个中间结果到达）
+    const seg = new ParagraphSegmenter();
+    const final = (recvAtMs: number) => ({
+      sentenceEnd: true, beginTime: null, endTime: null, recvAtMs,
+    });
+    const mid = (recvAtMs: number) => ({
+      sentenceEnd: false, beginTime: null, endTime: null, recvAtMs,
+    });
+    check('无时间戳：首句不分段', seg.offer(final(1500))?.paraBreak === false);
+    seg.offer(mid(1700));
+    check('无时间戳：本地 gap 200ms 不分段', seg.offer(final(2000))?.paraBreak === false);
+    seg.offer(mid(2200));
+    check('无时间戳：本地 gap 200ms 仍不分段', seg.offer(final(2500))?.paraBreak === false);
+    seg.offer(mid(4500));
+    check('无时间戳：本地 gap 2000ms 触发分段', seg.offer(final(5000))?.paraBreak === true);
+  }
+
+  {
+    // reset 后回到初始态：不会因为历史 gap 而误判
+    const seg = new ParagraphSegmenter();
+    seg.offer({ sentenceEnd: true, beginTime: 0, endTime: 100, recvAtMs: 100 });
+    seg.reset();
+    const after = seg.offer({ sentenceEnd: true, beginTime: 0, endTime: 100, recvAtMs: 200 });
+    check('reset 后首句不分段', after?.paraBreak === false);
+  }
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
