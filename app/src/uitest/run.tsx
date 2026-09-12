@@ -64,6 +64,9 @@ export async function runUiTest() {
   // 用对象 holder 而不是 `let x: string|null`：TS 会把它在流里收窄成 null/never
   const openStudioCtl: { arg: string | null } = { arg: null };
   const historySaveCtl: { payload: { text: string } | null } = { payload: null };
+  // 记录 historyUpdateText 的载荷：这是「编辑后回写同一条历史」的唯一证据，
+  // 之前 stub 成 () => Promise.resolve(true) 把参数丢了，写错 id/文本都测不出来。
+  const historyUpdateCtl: { payload: { id: number; text: string } | null } = { payload: null };
   // 记录真实传给 vp.copy 的那串文本。悬浮条界面上看不出「复制的内容对不对」——
   // 之前这里只查展示文本里有没有某个子串，所以 fullText 的换行错位一直没被抓到。
   const copyCtl: { text: string | null } = { text: null };
@@ -118,7 +121,10 @@ export async function runUiTest() {
         tones: [{ id: 5, name: '正式', description: '', lang: null, is_builtin: 1 }],
         defaultSceneId: 1,
       }),
-    historyUpdateText: () => Promise.resolve(true),
+    historyUpdateText: (payload: { id: number; text: string }) => {
+      historyUpdateCtl.payload = payload;
+      return Promise.resolve(true);
+    },
     toggle: () => {
       toggleCount += 1;
       return Promise.resolve(IDLE);
@@ -702,6 +708,7 @@ export async function runUiTest() {
 
   // 编辑 → 复制，复制内容必须是**编辑后**的文本
   copyCtl.text = null;
+  historyUpdateCtl.payload = null;
   const ed = barEditor();
   if (ed) {
     // 不能直接 `ed.value = ...`：React 在 textarea 实例上装了 value tracker，
@@ -716,6 +723,14 @@ export async function runUiTest() {
   clickButton('复制');
   await flush();
   check('复制取编辑后的文本', copyCtl.text === '我改过的文本', JSON.stringify(copyCtl.text));
+
+  // 「编辑后回写同一条历史」的载荷断言：id 必须是 historySave 返回的 1（照抄
+  // 假 bridge 的返回值，id 管线断了就能红），text 必须是**编辑后**的文本
+  // （若 persistEdited 仍发未编辑的 fullText，此断言必红）。
+  const updated = historyUpdateCtl.payload as { id: number; text: string } | null;
+  check('编辑后回写历史：载荷为 { id: 1, text: 编辑后文本 }',
+    updated?.id === 1 && updated?.text === '我改过的文本',
+    JSON.stringify(updated));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

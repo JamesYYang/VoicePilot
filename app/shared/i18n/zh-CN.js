@@ -14,6 +14,7 @@ export const zhCN = {
   'bar.adopt': '采纳',
   'bar.openApp': '打开应用',
   'bar.advanced': '润色选项',
+  'bar.editPlaceholder': '可直接修改识别结果',
   'bar.adopt.fallback': '已复制到剪贴板，请手动粘贴（自动写回尚未实现）',
   'bar.err.mic': '麦克风不可用，请检查是否被其他程序占用',
   'bar.err.clipboard': '复制失败，请重试',

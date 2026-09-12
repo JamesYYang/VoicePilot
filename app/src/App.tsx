@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, Ref } from 'react';
 import { CaptureEngine } from './audio/capture';
 import { useT } from './i18n';
 
@@ -286,12 +286,17 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 拉预设（进入 reviewing 时，且只在没有时拉）。
   useEffect(() => {
     if (snap.state !== 'reviewing' || scenes.length > 0) return;
-    void vp.polishPresets().then((p) => {
-      setScenes(p.scenes);
-      setTones(p.tones);
-      setScene(p.scenes.find((x) => x.id === p.defaultSceneId) ?? p.scenes[0] ?? null);
-      setTone((prev) => prev ?? p.tones[0] ?? null);
-    });
+    void vp
+      .polishPresets()
+      .then((p) => {
+        setScenes(p.scenes);
+        setTones(p.tones);
+        setScene(p.scenes.find((x) => x.id === p.defaultSceneId) ?? p.scenes[0] ?? null);
+        setTone((prev) => prev ?? p.tones[0] ?? null);
+      })
+      .catch(() => {
+        // 拉预设失败就保持两个下拉为空，不让 rejection 冒成 unhandled。
+      });
   }, [snap.state, scenes.length, vp]);
 
   // reviewing 时把原文写入历史一次。文本归渲染进程所有，主进程只落库。
@@ -326,7 +331,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
   // 听写进行中自动滚到底部：这是「实时跟随」的展示，永远该看到最新那句。
   // 停止（reviewing）后不自动滚，让用户自由回翻查看。
-  const textRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLDivElement | HTMLTextAreaElement>(null);
   useEffect(() => {
     if (snap.state !== 'listening' && snap.state !== 'draining') return;
     const el = textRef.current;
@@ -350,7 +355,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     if (rounded === lastHeightRef.current) return;
     lastHeightRef.current = rounded;
     vp.resizeBar(rounded);
-  }, [draft, committed, snap, error, copied, vp]);
+  }, [draft, committed, snap, error, copied, edited, vp]);
 
   const paragraphs = useMemo(() => {
     // 按 paraBreak 分组，渲染成段落。
@@ -397,7 +402,8 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     await persistEdited();
     const ok = await vp.copy(edited);
     if (ok) {
-      setCopied(true);
+      // 只留 bar.adopt.fallback 一条提示；copied 状态由「复制」按钮负责，
+      // 两条同时显示会互相打架。
       setHint(t('bar.adopt.fallback'));
       return;
     }
@@ -441,14 +447,15 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       {/* reviewing 是可编辑面：textarea 是唯一真源；其余态保持只读展示（A2） */}
       {snap.state === 'reviewing' ? (
         <textarea
+          ref={textRef as Ref<HTMLTextAreaElement>}
           data-testid="bar-editor"
           style={styles.editor}
           value={edited}
           onChange={(e) => setEdited(e.target.value)}
-          placeholder={t('polish.placeholder')}
+          placeholder={t('bar.editPlaceholder')}
         />
       ) : (
-        <div ref={textRef} style={styles.text} data-testid="text">
+        <div ref={textRef as Ref<HTMLDivElement>} style={styles.text} data-testid="text">
           {paragraphs.map((lines, i) => (
             <span key={i}>
               {lines.join('')}

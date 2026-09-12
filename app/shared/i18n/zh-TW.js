@@ -13,6 +13,7 @@ export const zhTW = {
   'bar.adopt': '採納',
   'bar.openApp': '開啟應用',
   'bar.advanced': '潤色選項',
+  'bar.editPlaceholder': '可直接修改辨識結果',
   'bar.adopt.fallback': '已複製到剪貼簿，請手動貼上（自動寫回尚未實作）',
   'bar.err.mic': '麥克風不可用，請檢查是否被其他程式占用',
   'bar.err.clipboard': '複製失敗，請重試',

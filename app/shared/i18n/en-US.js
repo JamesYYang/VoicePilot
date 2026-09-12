@@ -13,6 +13,7 @@ export const enUS = {
   'bar.adopt': 'Apply',
   'bar.openApp': 'Open app',
   'bar.advanced': 'Polish options',
+  'bar.editPlaceholder': 'Edit the transcription directly',
   'bar.adopt.fallback': 'Copied to clipboard — paste it manually (auto-insert not implemented yet)',
   'bar.err.mic': 'Microphone unavailable — check if another app is using it',
   'bar.err.clipboard': 'Copy failed, please retry',
