@@ -2,7 +2,7 @@ import { loadCredentials } from '../asr/config.js';
 import { buildPolishMessages } from './prompt.js';
 import '../tls-ca.js';
 
-const MODEL = 'deepseek-v4-pro-0813';
+const MODEL = 'deepseek-v4-flash-0731';
 
 /** 文本含 CJK 汉字 → 'zh'，否则 'en'。用于决定润色输出语言指令。 */
 function detectLang(text) {
