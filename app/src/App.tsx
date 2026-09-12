@@ -112,6 +112,11 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 中性提示（「已复制，请手动粘贴」）。**不能**走 error/ERROR_TEXT：
   // ERROR_TEXT[kind] ?? message 里空串不是 nullish，会渲染成一片空白。
   const [hint, setHint] = useState('');
+  // 悬浮条内润色（Task 5）：polishOut 是流式下发的润色结果（下半只读区），
+  // polishing 反映请求进行中（按钮禁用 + 文案切换），polishError 存错误信息。
+  const [polishOut, setPolishOut] = useState('');
+  const [polishing, setPolishing] = useState(false);
+  const [polishError, setPolishError] = useState<string | null>(null);
 
   // 帧序号与未确认计数放在 ref：它们每 100ms 变一次，进 state 会白白重渲染
   const seqRef = useRef(0);
@@ -248,6 +253,10 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       setEdited('');
       setAdvancedOpen(false);
       setHint('');
+      // 上一段的润色结果/状态不能带到这一段
+      setPolishOut('');
+      setPolishing(false);
+      setPolishError(null);
       seqRef.current = 0;
       cumSamplesRef.current = 0;
       ackedSeqRef.current = 0;
@@ -298,6 +307,22 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
         // 拉预设失败就保持两个下拉为空，不让 rejection 冒成 unhandled。
       });
   }, [snap.state, scenes.length, vp]);
+
+  // 订阅润色流式事件（Task 3 起的通道，target=bar 时会路由到本窗口）。
+  // 与 Studio 的 PolishView 同款：delta 逐块追加，done/error 都收尾「进行中」。
+  useEffect(() => {
+    const offDelta = vp.onPolishDelta(({ text: d }) => setPolishOut((prev) => prev + d));
+    const offDone = vp.onPolishDone(() => setPolishing(false));
+    const offError = vp.onPolishError(({ message }) => {
+      setPolishError(message);
+      setPolishing(false);
+    });
+    return () => {
+      offDelta();
+      offDone();
+      offError();
+    };
+  }, [vp]);
 
   // reviewing 时把原文写入历史一次。文本归渲染进程所有，主进程只落库。
   // 每次会话只存一次：historySavedRef 在 warming 时重置。
@@ -369,9 +394,13 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     return out;
   }, [committed]);
 
+  // 「当前有效文本」：有润色结果就以润色结果为准，否则用编辑区。
+  // 复制 / 采纳都取这一份 —— 用户点了润色就是想让这段文本生效。
+  const effectiveText = polishOut.length > 0 ? polishOut : edited;
+
   const copy = useCallback(async () => {
     await persistEdited();
-    const ok = await vp.copy(edited);
+    const ok = await vp.copy(effectiveText);
     setCopied(ok);
     if (ok) {
       // PRD §4.3：复制后悬浮条淡出。状态由主进程持有，这里只发一个 toggle
@@ -382,7 +411,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     // 复制失败要**看得见**。静默失败最糟糕：用户以为复制成功了，
     // 切到目标应用一粘贴，出来的是上一次的内容。
     showError({ kind: 'clipboard', message: t('bar.err.clipboard') });
-  }, [edited, persistEdited, vp, t]);
+  }, [effectiveText, persistEdited, vp, t]);
 
   /** 「打开应用」：带着编辑后的文本去主应用（悬浮条随即关闭）。 */
   const openApp = useCallback(() => {
@@ -400,23 +429,38 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 是 Plan 2B。用户明确接受这个中间形态：UI 闭环先成立，注入后补。
   const adopt = useCallback(async () => {
     await persistEdited();
-    const ok = await vp.copy(edited);
+    // 有润色结果时把它作为「采用后的正式文本」回写历史（Task 5）。
+    // 回写失败不阻塞采纳：界面闭环优先。
+    if (polishOut.length > 0) {
+      try {
+        await vp.adoptPolish({ polished: polishOut, scene: scene?.name ?? '', tone: tone?.name ?? '' });
+      } catch {
+        /* 回写失败不阻塞采纳 */
+      }
+    }
+    const ok = await vp.copy(effectiveText);
     if (ok) {
-      // 只留 bar.adopt.fallback 一条提示；copied 状态由「复制」按钮负责，
-      // 两条同时显示会互相打架。
+      setCopied(true);
       setHint(t('bar.adopt.fallback'));
       return;
     }
     showError({ kind: 'clipboard', message: t('bar.err.clipboard') });
-  }, [edited, persistEdited, vp, t]);
+  }, [effectiveText, polishOut, persistEdited, scene, tone, vp, t]);
 
-  // 悬浮条内润色在 Task 5 实现。本 Task 先把按钮立起来并保证点了有反应：
-  // 缺预设时展开折叠区让用户先选。Task 5 会用真正的流式润色替换这段。
+  // 悬浮条内润色：把编辑区文本连同场景/语气发给主进程，流式结果落到下半区。
+  // 缺预设时先把折叠区打开（否则按钮点了没反应），让用户先选场景/语气。
   // setHint('')：一次性提示（「已复制，请手动粘贴」）在用户发起新动作时清掉。
   const runPolish = useCallback(() => {
+    if (!scene || !tone) {
+      setAdvancedOpen(true); // 没选预设就把折叠区打开，别让按钮点了没反应
+      return;
+    }
+    setPolishOut('');
+    setPolishError(null);
     setHint('');
-    setAdvancedOpen(true);
-  }, []);
+    setPolishing(true);
+    void vp.startPolish({ text: edited, scene, tone, target: 'bar' });
+  }, [edited, scene, tone, vp]);
 
   // idle 时什么都不渲染。窗口是透明的，不渲染就等于隐藏。
   // 但出错时即便已回到 idle 也要多停留几秒（errorHold），
@@ -466,6 +510,14 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
         </div>
       )}
 
+      {/* 下半只读区：流式润色结果。有错误时优先显示错误（即使已无结果）。
+          在编辑区与按钮行之间，flex:'0 0 auto' 保证不会把编辑区压没。 */}
+      {snap.state === 'reviewing' && (polishing || polishOut.length > 0 || polishError) && (
+        <div data-testid="bar-polish-output" style={styles.output}>
+          {polishError ? t('polish.errorPrefix') + polishError : polishOut}
+        </div>
+      )}
+
       {snap.state === 'reviewing' && (
         <>
           <div style={styles.actions}>
@@ -473,9 +525,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
               style={styles.button}
               data-testid="bar-polish"
               onClick={runPolish}
-              disabled={edited.trim().length === 0}
+              disabled={edited.trim().length === 0 || polishing}
             >
-              {t('bar.polish')}
+              {polishing ? t('polish.running') : t('bar.polish')}
             </button>
             <button
               style={styles.button}
@@ -603,6 +655,21 @@ const styles = {
     borderRadius: 6,
     padding: 8,
     fontFamily: 'inherit' as const,
+    userSelect: 'text' as const,
+  },
+  // 润色结果下半区：与 editor 同款边框/内边距，但底色略深以示「不是可编辑的原文」。
+  // flex:'0 0 auto' —— 编辑区仍是 flex:1 的主角，结果区不参与抢空间，
+  // 长结果靠自己的 overflowY 滚动。
+  output: {
+    flex: '0 0 auto' as const,
+    maxHeight: 120,
+    overflowY: 'auto' as const,
+    border: '1px solid #d1d5db',
+    borderRadius: 6,
+    padding: 8,
+    background: '#f1f5f9',
+    scrollbarWidth: 'thin' as const,
+    whiteSpace: 'pre-wrap' as const,
     userSelect: 'text' as const,
   },
   actions: { display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },

@@ -70,6 +70,12 @@ export async function runUiTest() {
   // 记录真实传给 vp.copy 的那串文本。悬浮条界面上看不出「复制的内容对不对」——
   // 之前这里只查展示文本里有没有某个子串，所以 fullText 的换行错位一直没被抓到。
   const copyCtl: { text: string | null } = { text: null };
+  // 悬浮条（App）自己的润色流式监听器 holder。App 与 Studio 是两个独立的假
+  // bridge（见下方 studioBridge），各存各的，不会互相覆盖。Task 5 之前 App 没
+  // 订阅过这三个事件，缺了它们点「润色」后 delta 无处可发，测试永远红。
+  const barPolishDelta: { cb: ((p: { text: string }) => void) | null } = { cb: null };
+  const barPolishDone: { cb: (() => void) | null } = { cb: null };
+  const barPolishError: { cb: ((p: { message: string }) => void) | null } = { cb: null };
   let captureStarted = false;
   let captureStopped = false;
   // 初值给空函数而不是 null：这样类型是「永远可调用」，
@@ -124,6 +130,30 @@ export async function runUiTest() {
     historyUpdateText: (payload: { id: number; text: string }) => {
       historyUpdateCtl.payload = payload;
       return Promise.resolve(true);
+    },
+    // 悬浮条内润色（Task 5）。与 Studio 的假 bridge 分开声明是必须的：
+    // App 收的是这个 bridge，Studio 收的是 studioBridge，两者监听器各挂各的。
+    // 载荷里 target 是 Task 3 新增的路由字段，直接记进 polishCall/adoptCall，
+    // 与 Studio 断言共用同一批 holder（Studio 的断言在本文件更早处已跑完）。
+    startPolish: (payload: { text: string; scene: Preset; tone: Preset; target?: 'bar' | 'studio' }) => {
+      polishCall.payload = payload;
+      return Promise.resolve(true);
+    },
+    adoptPolish: (payload: { polished: string; scene: string; tone: string }) => {
+      adoptCall.payload = payload;
+      return Promise.resolve(true);
+    },
+    onPolishDelta: (cb: (p: { text: string }) => void) => {
+      barPolishDelta.cb = cb;
+      return () => {};
+    },
+    onPolishDone: (cb: () => void) => {
+      barPolishDone.cb = cb;
+      return () => {};
+    },
+    onPolishError: (cb: (p: { message: string }) => void) => {
+      barPolishError.cb = cb;
+      return () => {};
     },
     toggle: () => {
       toggleCount += 1;
@@ -377,7 +407,7 @@ export async function runUiTest() {
 
   // 用对象属性兜住调用载荷：TS 会把 `let x = null` 收窄成 null（闭包里的
   // 赋值不在它的流分析里），属性访问则不会被这样收窄。
-  const polishCall: { payload: { text: string; scene: Preset; tone: Preset } | null } = { payload: null };
+  const polishCall: { payload: { text: string; scene: Preset; tone: Preset; target?: 'bar' | 'studio' } | null } = { payload: null };
   const adoptCall: { payload: { polished: string; scene: string; tone: string } | null } = { payload: null };
   // 给 Studio 注入假 bridge（与 App 同款模式），不动只读的 window.voicepilot。
   // onStudioRefresh 必须多播：Studio 与 PolishView 都会订阅（真实 preload 的
@@ -731,6 +761,40 @@ export async function runUiTest() {
   check('编辑后回写历史：载荷为 { id: 1, text: 编辑后文本 }',
     updated?.id === 1 && updated?.text === '我改过的文本',
     JSON.stringify(updated));
+
+  // ---- 23. 悬浮条内润色：上下分栏 + 流式 + 采纳取润色结果 ----
+  await enterReviewing();
+  polishCall.payload = null;
+  clickButton('润色');
+  await flush();
+  // 显式断言绕开 TS 对对象属性的流收窄（上面刚赋过 null，否则被收窄成 never）
+  const barPolishFired = polishCall.payload as
+    { text: string; scene: Preset; tone: Preset; target?: 'bar' | 'studio' } | null;
+  check('悬浮条发起的润色带 target=bar',
+    barPolishFired?.target === 'bar', JSON.stringify(barPolishFired));
+  check('点润色后出现下半结果区',
+    container.querySelector('[data-testid="bar-polish-output"]') != null);
+  check('润色中「润色」按钮禁用',
+    container.querySelector<HTMLButtonElement>('[data-testid="bar-polish"]')?.disabled === true);
+
+  barPolishDelta.cb?.({ text: '润色后的' });
+  barPolishDelta.cb?.({ text: '第一句' });
+  await flush();
+  check('润色 delta 追加到下半区',
+    container.querySelector('[data-testid="bar-polish-output"]')?.textContent === '润色后的第一句',
+    JSON.stringify(container.querySelector('[data-testid="bar-polish-output"]')?.textContent));
+
+  barPolishDone.cb?.();
+  await flush();
+  copyCtl.text = null;
+  adoptCall.payload = null;
+  clickButton('采纳');
+  await flush();
+  // 同上：显式断言绕开流收窄，否则 adoptCall.payload 被判成 never
+  const barAdopted = adoptCall.payload as { polished: string; scene: string; tone: string } | null;
+  check('采纳取润色结果（不是编辑区原文）', copyCtl.text === '润色后的第一句', JSON.stringify(copyCtl.text));
+  check('采纳把润色结果回写历史',
+    barAdopted?.polished === '润色后的第一句', JSON.stringify(barAdopted));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
