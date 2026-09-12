@@ -92,8 +92,9 @@ git commit -m "chore(asr): 加 VP_ASR_DEBUG 原始事件日志开关（默认关
 
 **Files:**
 - Create: `app/src/segment/segmenter.ts`
-- Test: `app/src/uitest/run.tsx`（末尾追加断言区块）
-- Modify: `app/src/App.tsx`（删除本地的 `median`/`breakThresholdMs` 与 `PARA_BREAK_*` 常量，改 import）
+- Test: `app/src/uitest/run.tsx`（`runUiTest()` 汇总块之前追加断言区块）
+
+> 注意：本 Task **不碰** `app/src/App.tsx`。本地 `median` / `breakThresholdMs` / `PARA_BREAK_*` 的删除与接入属于 Task 3 —— 在这里先删会让 App.tsx 立刻编译不过（它的分段逻辑还在用它们）。
 
 **Interfaces:**
 - Consumes: 无
