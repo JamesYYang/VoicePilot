@@ -73,6 +73,10 @@ interface VoicePilotBridge {
   revealPath(path: string): void;
   /** 退出应用（托盘图标目前是空图，点不到菜单里的退出） */
   quit(): void;
+  /** 读当前全局快捷键。isDefault 表示未自定义。 */
+  getShortcut(): Promise<{ accel: string; isDefault: boolean }>;
+  /** 设置全局快捷键。冲突时 ok:false 且不生效。 */
+  setShortcut(accel: string): Promise<{ ok: boolean; accel: string }>;
 
   // —— 主应用（Studio）——
   /** 打开主应用并带入待润色文本 */

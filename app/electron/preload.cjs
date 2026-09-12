@@ -250,6 +250,18 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:key/close');
   },
 
+  // ---------------------------------------------------------------- 快捷键（F7）
+
+  /** 读当前快捷键 { accel, isDefault }。 */
+  getShortcut() {
+    return ipcRenderer.invoke('vp:shortcut/get');
+  },
+
+  /** 设置快捷键。冲突时返回 { ok:false } 且不生效。 */
+  setShortcut(accel) {
+    return ipcRenderer.invoke('vp:shortcut/set', accel);
+  },
+
   // ---------------------------------------------------------------- 权限（F12）
 
   /** macOS 辅助功能授权状态。非 macOS 返回 {accessibility: null}。 */

@@ -19,7 +19,7 @@ import { createStudioWindow } from './studio.js';
 import { createOnboardingWindow } from './onboarding.js';
 import { createKeyEntryWindow } from './key-entry.js';
 import { bootstrapCredentials, refreshFromEndpoint } from './asr/config.js';
-import { getMeta } from './store.js';
+import { getMeta, getShortcut, setShortcut } from './store.js';
 import { t } from '../shared/i18n/index.js';
 import { getCurrentLocale } from './locale.js';
 
@@ -412,23 +412,39 @@ async function refreshAuthFromTray() {
   void promptAuthRetry(r.kind);
 }
 
-function registerShortcuts(machine) {
-  // PRD §4.2：默认 macOS ⌥Space，Windows Ctrl+Shift+Space。
-  // Windows 上不能用 Alt+Space（系统菜单）或 Win+Space（输入法切换）。
-  const accel = process.platform === 'darwin' ? 'Alt+Space' : 'Ctrl+Shift+Space';
+/** 平台默认快捷键。Windows 不能用 Alt+Space（系统菜单）或 Win+Space（输入法切换）。 */
+function defaultAccel() {
+  return process.platform === 'darwin' ? 'Alt+Space' : 'Ctrl+Shift+Space';
+}
 
+/** 当前生效的快捷键（用户自定义优先）。trim 是因为 store 存的是原值，可能带空白。 */
+function currentAccel() {
+  return (getShortcut() ?? defaultAccel()).trim();
+}
+
+let boundAccel = null;
+
+/**
+ * 注销旧的、注册新的。返回是否成功。
+ * 失败（被别的程序占用）时不改 store —— 保持「当前生效键」与「已存键」一致。
+ */
+function applyShortcut(machine, accel) {
+  if (boundAccel) globalShortcut.unregister(boundAccel);
   const ok = globalShortcut.register(accel, () => {
-    // 直接驱动状态机，不再经渲染进程转发：
-    // 状态只有一个源头（主进程），渲染进程只负责显示，避免两边状态打架。
+    // 直接驱动状态机，不再经渲染进程转发（状态只有一个源头）
     void machine.toggle();
   });
-
-  if (!ok) {
-    // 注册失败几乎都是被别的程序占用了。PRD §4.2 要求设置界面做冲突检测。
-    console.error(`[快捷键] ${accel} 注册失败：可能已被其他程序占用`);
-  } else {
+  if (ok) {
+    boundAccel = accel;
     console.log(`[快捷键] ${accel} 已注册`);
+  } else {
+    // 注册失败：回滚到上一个可用键，避免出现「一个键都没有」
+    console.error(`[快捷键] ${accel} 注册失败：可能已被其他程序占用`);
+    if (boundAccel) {
+      globalShortcut.register(boundAccel, () => void machine.toggle());
+    }
   }
+  return ok;
 }
 
 
@@ -440,7 +456,16 @@ app.whenReady().then(async () => {
   // 协议与 IPC 必须先注册：自测窗口也走 app:// 协议，也要用到 vp:copy 等通道。
   // 注册动作本身没有副作用，放在分支之前最省心。
   registerAppProtocol();
-  const machine = registerIpc({ getBar: () => bar, requestQuit, attachDevLogging, resizeBar, rebuildTray });
+  const machine = registerIpc({
+    getBar: () => bar,
+    requestQuit,
+    attachDevLogging,
+    resizeBar,
+    rebuildTray,
+    applyShortcut,
+    currentAccel,
+    defaultAccel,
+  });
 
   // 前两个自测都是「不建窗口、跑完就退」，可以在无人值守的机器上跑，
   // 验的也都是主进程的真实路径。
@@ -481,7 +506,7 @@ app.whenReady().then(async () => {
 
   createBar();
   createTray();
-  registerShortcuts(machine);
+  applyShortcut(machine, currentAccel());
 
   // 凭据来源：.env（仅开发）→ 本地缓存 → 内网端点。开发期有 .env 时上面两步都不碰端点。
   const boot = await bootstrapCredentials();

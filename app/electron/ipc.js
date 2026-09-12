@@ -8,7 +8,7 @@ import { createStudioWindow, getStudioWindow } from './studio.js';
 import { getOnboardingWindow } from './onboarding.js';
 import { getKeyEntryWindow } from './key-entry.js';
 import { saveCredentials } from './asr/config.js';
-import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, deleteHistory } from './store.js';
+import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, deleteHistory, getShortcut, setShortcut } from './store.js';
 import { streamPolish } from './llm/polish.js';
 
 /**
@@ -25,7 +25,7 @@ import { streamPolish } from './llm/polish.js';
 let pendingStudioText = '';
 let pendingHistoryId = null;
 
-export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, rebuildTray }) {
+export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, rebuildTray, applyShortcut, currentAccel, defaultAccel }) {
   /**
    * 主进程 → 渲染进程。
    * 悬浮条可能还没加载完，也可能已被关闭，发送前必须检查。
@@ -120,6 +120,26 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
   });
 
   ipcMain.on('vp:quit', () => requestQuit());
+
+  // ---------------------------------------------------------------- 快捷键（F7）
+
+  /** 读当前快捷键。isDefault 表示用户没自定义过。 */
+  ipcMain.handle('vp:shortcut/get', () => {
+    const custom = getShortcut();
+    return { accel: custom ?? defaultAccel(), isDefault: custom == null };
+  });
+
+  /**
+   * 设置快捷键。成功则落库并重注册；失败（冲突）返回 ok:false 且不改动。
+   * 需要 main.js 传进来的 applyShortcut / defaultAccel。
+   */
+  ipcMain.handle('vp:shortcut/set', (_e, accel) => {
+    const next = String(accel ?? '').trim();
+    if (!next) return { ok: false, accel: currentAccel() };
+    const ok = applyShortcut(machine, next);
+    if (ok) setShortcut(next);
+    return { ok, accel: currentAccel() };
+  });
 
   /** 界面自测跑完：把成败变成进程退出码，便于脚本/CI 判断。 */
   ipcMain.on('vp:uitest-result', (_e, r) => {
