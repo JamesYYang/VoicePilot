@@ -64,6 +64,9 @@ export async function runUiTest() {
   // 用对象 holder 而不是 `let x: string|null`：TS 会把它在流里收窄成 null/never
   const openStudioCtl: { arg: string | null } = { arg: null };
   const historySaveCtl: { payload: { text: string } | null } = { payload: null };
+  // 记录真实传给 vp.copy 的那串文本。悬浮条界面上看不出「复制的内容对不对」——
+  // 之前这里只查展示文本里有没有某个子串，所以 fullText 的换行错位一直没被抓到。
+  const copyCtl: { text: string | null } = { text: null };
   let captureStarted = false;
   let captureStopped = false;
   // 初值给空函数而不是 null：这样类型是「永远可调用」，
@@ -93,7 +96,10 @@ export async function runUiTest() {
     // contextBridge 暴露的属性不是可枚举的，展开运算符复制不到，
     // 拿到的是 undefined，调用时抛 TypeError，async 函数静默 reject，
     // 表现是「点了复制毫无反应」，且控制台没有一行相关报错。
-    copy: (text: string) => real.copy(text),
+    copy: (text: string) => {
+      copyCtl.text = text;
+      return real.copy(text);
+    },
     reportPainted: (at: number) => real.reportPainted(at),
     openStudio: (payload: { text: string; historyId?: number }) => {
       openStudioCtl.arg = payload.text;
@@ -244,7 +250,10 @@ export async function runUiTest() {
   check('reviewing 出现「复制」按钮', buttons.some((b) => b.textContent === '复制'));
 
   const copyBtn = buttons.find((b) => b.textContent === '复制');
-  const expectedText = committedEl?.textContent ?? '';
+  // 四个定稿句「每句一行」后的全文，就是复制 / 落库 / 送润色都该拿到的那一份文本。
+  // 断言用全等而不是 includes：换行错位（首两句粘连、尾部多一个换行）必须能红。
+  const expectedCommittedText =
+    '今天我们要讨论三件事\n第一件是采集\n第二件是识别\n第三件是润色';
 
   // 先探测剪贴板在这个环境里到底能不能用。
   // 有些会话环境（沙箱、远程桌面）根本拿不到剪贴板 —— 那就不能拿
@@ -278,13 +287,14 @@ export async function runUiTest() {
     check('复制失败时不关闭悬浮条（留给用户重试）', toggleCount === 0,
       `toggle 调用 ${toggleCount} 次`);
   }
-  check('复制内容与界面文本一致', expectedText.includes('三件事'));
+  check('复制内容与界面文本一致', copyCtl.text === expectedCommittedText,
+    JSON.stringify(copyCtl.text));
 
   // ---- 6.5 润色 + 历史保存：进入 reviewing 时原文已写入历史一次 ----
   fire('state', { state: 'reviewing', notice: null, truncated: false });
   await flush();
   check('reviewing 时已调用 historySave 且带全文',
-    (historySaveCtl.payload?.text ?? '').includes('三件事'),
+    historySaveCtl.payload?.text === expectedCommittedText,
     JSON.stringify(historySaveCtl.payload));
   toggleCount = 0;
   openStudioCtl.arg = null;
@@ -292,7 +302,7 @@ export async function runUiTest() {
   await flush();
   // 显式断言绕开 TS 对对象属性的流收窄（否则被收窄成 never）
   const openedArg = openStudioCtl.arg as string | null;
-  check('点「润色」调用 openStudio 且带全文', (openedArg ?? '').includes('三件事'),
+  check('点「润色」调用 openStudio 且带全文', openedArg === expectedCommittedText,
     JSON.stringify(openedArg));
   check('点「润色」后悬浮条关闭（触发 toggle）', toggleCount === 1, `toggle 调用 ${toggleCount} 次`);
 

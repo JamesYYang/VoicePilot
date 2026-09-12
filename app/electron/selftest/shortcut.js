@@ -52,16 +52,23 @@ export async function runShortcutSelftest() {
   const okMalformedKeepsBinding =
     globalShortcut.isRegistered(A) === true && boundShortcut() === A;
 
+  // ---- 6. 挂起态下重录当前键：prev === accel 短路必须返回 true ----
+  // 挂起态里 register 必然返回 false（见用例 4），而「重录当前键」本身也是
+  // 重复注册、register 同样返回 false。两者叠加时若只看 register 的返回值，
+  // 用户点一次「把当前键设为生效键」就会被误报成「已被占用」。
+  setShortcutSuspended(true);
+  const okSuspendedRerecord = applyShortcut(fakeMachine, A) === true && boundShortcut() === A;
+
   globalShortcut.unregisterAll();
 
   const ok =
     okDefault && okFirst && okRerecord && okReplace &&
     okSuspendedApply && okSuspendedRegistered && okResumedAfter &&
-    okMalformed && okMalformedKeepsBinding;
+    okMalformed && okMalformedKeepsBinding && okSuspendedRerecord;
   console.log(
     `[自测] ${ok ? '通过' : '失败'} 默认值=${okDefault} 首次=${okFirst} 重录=${okRerecord} 换键=${okReplace} ` +
     `挂起注册=${okSuspendedApply} 挂起后已注册=${okSuspendedRegistered} 恢复=${okResumedAfter} ` +
-    `非法键=${okMalformed} 非法键不毁旧键=${okMalformedKeepsBinding}`
+    `非法键=${okMalformed} 非法键不毁旧键=${okMalformedKeepsBinding} 挂起重录=${okSuspendedRerecord}`
   );
   return { ok };
 }

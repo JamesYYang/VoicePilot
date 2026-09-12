@@ -53,8 +53,6 @@ interface Snapshot {
 interface Partial {
   text: string;
   sentenceEnd: boolean;
-  beginTime: number | null;
-  endTime: number | null;
 }
 
 interface Committed {
@@ -256,8 +254,11 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   const fullText = useMemo(() => {
     const parts: string[] = [];
     for (const c of committed) {
+      // paraBreak 语义是「这句之前另起一行」，与 paragraphs 的渲染保持一致：
+      // 先补换行、再放本句。反过来（先放后补）会把换行留在句尾，
+      // 复制/落库/送润色的文本就和屏幕上看到的布局不一致。
+      if (c.paraBreak && parts.length > 0) parts.push('\n');
       parts.push(c.text);
-      if (c.paraBreak) parts.push('\n');
     }
     return [...parts, draft].join('');
   }, [committed, draft]);
