@@ -101,6 +101,17 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   const [errorHold, setErrorHold] = useState(false);
   const [hovering, setHovering] = useState(false);
   const [copied, setCopied] = useState(false);
+  // reviewing 态的可编辑面：edited 是唯一真源（进态时由派生文本灌一次），
+  // scenes/tones 来自主进程预设通道，scene/tone 只用于 Task 5 的润色请求。
+  const [edited, setEdited] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [scenes, setScenes] = useState<Preset[]>([]);
+  const [tones, setTones] = useState<Preset[]>([]);
+  const [scene, setScene] = useState<Preset | null>(null);
+  const [tone, setTone] = useState<Preset | null>(null);
+  // 中性提示（「已复制，请手动粘贴」）。**不能**走 error/ERROR_TEXT：
+  // ERROR_TEXT[kind] ?? message 里空串不是 nullish，会渲染成一片空白。
+  const [hint, setHint] = useState('');
 
   // 帧序号与未确认计数放在 ref：它们每 100ms 变一次，进 state 会白白重渲染
   const seqRef = useRef(0);
@@ -234,6 +245,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       setCommitted([]);
       setDraft('');
       setCopied(false);
+      setEdited('');
+      setAdvancedOpen(false);
+      setHint('');
       seqRef.current = 0;
       cumSamplesRef.current = 0;
       ackedSeqRef.current = 0;
@@ -263,6 +277,23 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     return [...parts, draft].join('');
   }, [committed, draft]);
 
+  // reviewing 一进来把派生文本灌进编辑区；之后 edited 就是唯一真源。
+  // 依赖数组**故意不含 fullText** —— 含进去会在用户每次打字后重跑并覆盖编辑内容。
+  useEffect(() => {
+    if (snap.state === 'reviewing') setEdited(fullText);
+  }, [snap.state]);
+
+  // 拉预设（进入 reviewing 时，且只在没有时拉）。
+  useEffect(() => {
+    if (snap.state !== 'reviewing' || scenes.length > 0) return;
+    void vp.polishPresets().then((p) => {
+      setScenes(p.scenes);
+      setTones(p.tones);
+      setScene(p.scenes.find((x) => x.id === p.defaultSceneId) ?? p.scenes[0] ?? null);
+      setTone((prev) => prev ?? p.tones[0] ?? null);
+    });
+  }, [snap.state, scenes.length, vp]);
+
   // reviewing 时把原文写入历史一次。文本归渲染进程所有，主进程只落库。
   // 每次会话只存一次：historySavedRef 在 warming 时重置。
   useEffect(() => {
@@ -274,6 +305,19 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       historyIdRef.current = r?.id ?? null;
     });
   }, [snap.state, fullText, vp]);
+
+  // 编辑后的文本回写同一条历史（采纳 / 复制 / 关闭 / 打开应用 时各调一次）。
+  // 落库失败不阻塞主流程：界面闭环优先，下次听写会另起一条。
+  const persistEdited = useCallback(async () => {
+    const id = historyIdRef.current;
+    if (id == null) return;
+    if (edited.trim().length === 0) return;
+    try {
+      await vp.historyUpdateText({ id, text: edited });
+    } catch {
+      /* 落库失败不阻塞主流程 */
+    }
+  }, [edited, vp]);
 
   // 移入时关闭穿透（按钮可点），移出时恢复穿透（不挡住下面的应用）
   useEffect(() => {
@@ -321,7 +365,8 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   }, [committed]);
 
   const copy = useCallback(async () => {
-    const ok = await vp.copy(fullText);
+    await persistEdited();
+    const ok = await vp.copy(edited);
     setCopied(ok);
     if (ok) {
       // PRD §4.3：复制后悬浮条淡出。状态由主进程持有，这里只发一个 toggle
@@ -332,7 +377,40 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     // 复制失败要**看得见**。静默失败最糟糕：用户以为复制成功了，
     // 切到目标应用一粘贴，出来的是上一次的内容。
     showError({ kind: 'clipboard', message: t('bar.err.clipboard') });
-  }, [fullText, vp, t]);
+  }, [edited, persistEdited, vp, t]);
+
+  /** 「打开应用」：带着编辑后的文本去主应用（悬浮条随即关闭）。 */
+  const openApp = useCallback(() => {
+    void persistEdited();
+    void vp.openStudio({ text: edited, historyId: historyIdRef.current ?? undefined });
+    void vp.toggle();
+  }, [edited, persistEdited, vp]);
+
+  const close = useCallback(() => {
+    void persistEdited();
+    void vp.toggle();
+  }, [persistEdited, vp]);
+
+  // 本 Task 只做「复制 + 明确提示」；真正的写回（取前台窗口 → 还原焦点 → 粘贴）
+  // 是 Plan 2B。用户明确接受这个中间形态：UI 闭环先成立，注入后补。
+  const adopt = useCallback(async () => {
+    await persistEdited();
+    const ok = await vp.copy(edited);
+    if (ok) {
+      setCopied(true);
+      setHint(t('bar.adopt.fallback'));
+      return;
+    }
+    showError({ kind: 'clipboard', message: t('bar.err.clipboard') });
+  }, [edited, persistEdited, vp, t]);
+
+  // 悬浮条内润色在 Task 5 实现。本 Task 先把按钮立起来并保证点了有反应：
+  // 缺预设时展开折叠区让用户先选。Task 5 会用真正的流式润色替换这段。
+  // setHint('')：一次性提示（「已复制，请手动粘贴」）在用户发起新动作时清掉。
+  const runPolish = useCallback(() => {
+    setHint('');
+    setAdvancedOpen(true);
+  }, []);
 
   // idle 时什么都不渲染。窗口是透明的，不渲染就等于隐藏。
   // 但出错时即便已回到 idle 也要多停留几秒（errorHold），
@@ -360,39 +438,104 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
       {error && <div style={styles.error}>{ERROR_TEXT[error.kind] ?? error.message}</div>}
 
-      <div ref={textRef} style={styles.text} data-testid="text">
-        {paragraphs.map((lines, i) => (
-          <span key={i}>
-            {lines.join('')}
-            {i < paragraphs.length - 1 ? '\n' : ''}
-          </span>
-        ))}
-        {draft && <span style={styles.draft}>{draft}</span>}
-      </div>
-
-      {snap.state === 'reviewing' && (
-        <div style={styles.actions}>
-          <button
-            style={styles.button}
-            onClick={() => {
-              void vp.openStudio({ text: fullText, historyId: historyIdRef.current ?? undefined });
-              // 悬浮条与主应用不同时出现：润色打开主应用后，悬浮条随即关闭
-              void vp.toggle();
-            }}
-          >
-            {t('bar.polish')}
-          </button>
-          <button style={styles.button} onClick={copy} disabled={fullText.length === 0}>
-            {t('bar.copy')}
-          </button>
-          <button style={styles.ghost} onClick={() => void vp.toggle()}>
-            {t('bar.close')}
-          </button>
-          {snap.truncated && <span style={styles.warn}>{t('bar.truncated')}</span>}
+      {/* reviewing 是可编辑面：textarea 是唯一真源；其余态保持只读展示（A2） */}
+      {snap.state === 'reviewing' ? (
+        <textarea
+          data-testid="bar-editor"
+          style={styles.editor}
+          value={edited}
+          onChange={(e) => setEdited(e.target.value)}
+          placeholder={t('polish.placeholder')}
+        />
+      ) : (
+        <div ref={textRef} style={styles.text} data-testid="text">
+          {paragraphs.map((lines, i) => (
+            <span key={i}>
+              {lines.join('')}
+              {i < paragraphs.length - 1 ? '\n' : ''}
+            </span>
+          ))}
+          {draft && <span style={styles.draft}>{draft}</span>}
         </div>
       )}
 
+      {snap.state === 'reviewing' && (
+        <>
+          <div style={styles.actions}>
+            <button
+              style={styles.button}
+              data-testid="bar-polish"
+              onClick={runPolish}
+              disabled={edited.trim().length === 0}
+            >
+              {t('bar.polish')}
+            </button>
+            <button
+              style={styles.button}
+              data-testid="bar-copy"
+              onClick={copy}
+              disabled={edited.length === 0}
+            >
+              {t('bar.copy')}
+            </button>
+            <button
+              style={styles.button}
+              data-testid="bar-adopt"
+              onClick={adopt}
+              disabled={edited.trim().length === 0}
+            >
+              {t('bar.adopt')}
+            </button>
+            <button style={styles.ghost} data-testid="bar-open-app" onClick={openApp}>
+              {t('bar.openApp')}
+            </button>
+            <button style={styles.ghost} onClick={() => void close()}>
+              {t('bar.close')}
+            </button>
+            {snap.truncated && <span style={styles.warn}>{t('bar.truncated')}</span>}
+          </div>
+          <div style={styles.advanced}>
+            <button
+              style={styles.ghost}
+              data-testid="bar-advanced-toggle"
+              onClick={() => setAdvancedOpen((v) => !v)}
+            >
+              {t('bar.advanced')}
+            </button>
+            {advancedOpen && (
+              <>
+                <select
+                  style={styles.select}
+                  data-testid="bar-scene"
+                  value={scene?.name ?? ''}
+                  onChange={(e) => setScene(scenes.find((p) => p.name === e.target.value) ?? null)}
+                >
+                  {scenes.map((p) => (
+                    <option key={p.id} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  style={styles.select}
+                  data-testid="bar-tone"
+                  value={tone?.name ?? ''}
+                  onChange={(e) => setTone(tones.find((p) => p.name === e.target.value) ?? null)}
+                >
+                  {tones.map((p) => (
+                    <option key={p.id} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
       {copied && <div style={styles.hint}>{t('bar.copied')}</div>}
+      {hint && <div style={styles.hint}>{hint}</div>}
     </div>
   );
 }
@@ -442,7 +585,30 @@ const styles = {
     userSelect: 'text' as const, // 允许选中复制，否则「查看」形同虚设
   },
   draft: { color: '#9ca3af' },
+  // reviewing 的可编辑区。flex:1 + minHeight:0 才能像 text 一样「撑满剩余空间
+  // 并在溢出时自己滚」，否则长文会把按钮行挤出窗口。
+  editor: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto' as const,
+    resize: 'none' as const,
+    border: '1px solid #d1d5db',
+    borderRadius: 6,
+    padding: 8,
+    fontFamily: 'inherit' as const,
+    userSelect: 'text' as const,
+  },
   actions: { display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },
+  advanced: { display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },
+  select: {
+    padding: '4px 8px',
+    borderRadius: 6,
+    border: '1px solid #d1d5db',
+    background: '#ffffff',
+    color: '#111827',
+    fontSize: 12,
+    outline: 'none',
+  },
   button: {
     padding: '4px 14px',
     borderRadius: 6,

@@ -109,6 +109,16 @@ export async function runUiTest() {
       historySaveCtl.payload = payload;
       return Promise.resolve({ id: 1 });
     },
+    // 悬浮条新链路（Task 3/4）用到的两个方法也必须显式委托 —— 同上，
+    // `...real` 复制不到非枚举属性；缺了 polishPresets 会让 App 的预设
+    // effect 直接抛 TypeError（未包 try），整轮自测崩在中间。
+    polishPresets: () =>
+      Promise.resolve({
+        scenes: [{ id: 1, name: '邮件', description: '', lang: null, is_builtin: 1 }],
+        tones: [{ id: 5, name: '正式', description: '', lang: null, is_builtin: 1 }],
+        defaultSceneId: 1,
+      }),
+    historyUpdateText: () => Promise.resolve(true),
     toggle: () => {
       toggleCount += 1;
       return Promise.resolve(IDLE);
@@ -298,13 +308,14 @@ export async function runUiTest() {
     JSON.stringify(historySaveCtl.payload));
   toggleCount = 0;
   openStudioCtl.arg = null;
-  clickButton('润色');
+  // Task 4 起「润色」改为条内润色入口（Task 5 落地），打开主应用改由「打开应用」承担
+  clickButton('打开应用');
   await flush();
   // 显式断言绕开 TS 对对象属性的流收窄（否则被收窄成 never）
   const openedArg = openStudioCtl.arg as string | null;
-  check('点「润色」调用 openStudio 且带全文', openedArg === expectedCommittedText,
+  check('点「打开应用」调用 openStudio 且带全文', openedArg === expectedCommittedText,
     JSON.stringify(openedArg));
-  check('点「润色」后悬浮条关闭（触发 toggle）', toggleCount === 1, `toggle 调用 ${toggleCount} 次`);
+  check('点「打开应用」后悬浮条关闭（触发 toggle）', toggleCount === 1, `toggle 调用 ${toggleCount} 次`);
 
   // ---- 7. 背压：未确认帧数超上限就丢 ----
   fire('state', { state: 'listening', notice: null, truncated: false });
@@ -640,6 +651,71 @@ export async function runUiTest() {
     acceleratorFromEvent({ key: 'y', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }) === null);
   check('无法表达的键（媒体键）返回 null',
     acceleratorFromEvent({ key: 'AudioVolumeUp', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === null);
+
+  // ---- 22. 悬浮条内闭环：可编辑 + 按钮集 + 折叠区 ----
+  // 进入一次干净的 reviewing：先回 idle 清场，再喂四句定稿 + 切 reviewing
+  const enterReviewing = async () => {
+    fire('state', { state: 'idle', notice: null, truncated: false });
+    await flush();
+    fire('state', { state: 'warming', notice: null, truncated: false });
+    await flush();
+    fire('state', { state: 'listening', notice: null, truncated: false });
+    for (const text of ['今天我们要讨论三件事', '第一件是采集', '第二件是识别', '第三件是润色']) {
+      // 按 AsrPartial 的完整形状 fire：fire() 的载荷类型就是这个接口，
+      // 少字段 TS 直接红（本文件既有的 partial 调用也都带全）。
+      fire('partial', {
+        text,
+        sentenceEnd: true,
+        recvAtMs: Date.now(),
+        sentenceId: null,
+        beginTime: null,
+        endTime: null,
+        words: [],
+      });
+    }
+    fire('state', { state: 'reviewing', notice: null, truncated: false });
+    await flush();
+    return container;
+  };
+
+  await enterReviewing();
+  const barEditor = () => container.querySelector<HTMLTextAreaElement>('[data-testid="bar-editor"]');
+  check('reviewing 渲染可编辑区', barEditor() != null);
+  check('编辑区初值为全文（每句一行）',
+    barEditor()?.value === '今天我们要讨论三件事\n第一件是采集\n第二件是识别\n第三件是润色',
+    JSON.stringify(barEditor()?.value));
+
+  const barButtons = () => Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+  check('按钮集为 润色/复制/采纳/打开应用/关闭',
+    ['润色', '复制', '采纳', '打开应用', '关闭'].every((l) => barButtons().includes(l)),
+    JSON.stringify(barButtons()));
+
+  check('折叠区默认折叠：看不到场景下拉',
+    container.querySelector('[data-testid="bar-scene"]') === null);
+  const advToggle = container.querySelector<HTMLButtonElement>('[data-testid="bar-advanced-toggle"]');
+  check('折叠区有展开按钮', advToggle != null);
+  advToggle?.click();
+  await flush();
+  check('展开后出现场景/语气下拉',
+    container.querySelector('[data-testid="bar-scene"]') != null &&
+      container.querySelector('[data-testid="bar-tone"]') != null);
+
+  // 编辑 → 复制，复制内容必须是**编辑后**的文本
+  copyCtl.text = null;
+  const ed = barEditor();
+  if (ed) {
+    // 不能直接 `ed.value = ...`：React 在 textarea 实例上装了 value tracker，
+    // 直接赋值会被 tracker 记下，派发 input 时它认为「值没变」，onChange 不触发
+    // （实测：编辑后的文本根本没进 state，复制拿到的还是原文）。
+    // 走原型上的原生 setter 绕过实例那层劫持，再派发 input，React 才会认。
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setter?.call(ed, '我改过的文本');
+    ed.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  await flush();
+  clickButton('复制');
+  await flush();
+  check('复制取编辑后的文本', copyCtl.text === '我改过的文本', JSON.stringify(copyCtl.text));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
