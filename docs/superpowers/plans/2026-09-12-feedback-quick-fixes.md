@@ -62,26 +62,22 @@ let debugCount = 0;
 Run: `cd app && VP_SM_SELFTEST=1 npx electron .`
 Expected: 通过，退出码 0（只加了一行日志，行为不变）
 
-- [ ] **Step 3: 人工抓一帧（需要麦克风，本步骤无法自动化）**
+- [ ] **Step 3: 抓一帧真实事件（不需要麦克风）**
 
-Run: `cd app && VP_ASR_DEBUG=1 npm run dev`
-操作：对着麦克风连续说 3 句、句间各停顿约 2 秒，然后停止。
-Expected: 终端出现若干行 `[ASR原始 n] {...}`。
+`app/electron/selftest/asr.js` 会构造**真实 `AsrSession`** 回放 `spike/audio/01-dictation-16k.wav`，配上本 Task 的开关即可直接打印原始帧：
 
-把其中**一条句尾事件**（`sentence_end` 为 `true` 的那条）与**一条中间事件**原文抄到本 Task 下方：
+Run: `cd app && VP_ASR_DEBUG=1 VP_ASR_SELFTEST=1 npx electron .`
+（需仓库根 `.env` 凭据；会真实调用百炼一次，费用可忽略。退出码可能因延迟预算不达标而非零，与本 Task 无关。）
+Expected: 出现若干行 `[ASR原始 n] {...}`。
 
-```
-（在此粘贴两条 JSON）
-```
+- [ ] **Step 4: 结论（2026-09-12 已实测，决定 Task 2 走哪条判据）**
 
-- [ ] **Step 4: 记录结论（决定 Task 2 走哪条判据）**
+实测结果（详见 `.superpowers/sdd/2026-09-12-feedback-quick-fixes/task-1-report.md` §8）：
 
-在本 Task 下方勾选并写明：
-
-- [ ] `begin_time` / `end_time` **存在**（两条都有非 null 值）
-- [ ] `begin_time` / `end_time` **缺失或为 null**
-- [ ] `sentence_end` **会**出现 `true`
-- [ ] `sentence_end` **从不**为 `true`（若勾此项，加一句说明，并停下来找设计者确认——这说明分段问题不是阈值问题）
+- ✅ `begin_time` / `end_time` **存在**：`begin_time` 在所有文本帧上非 null；`end_time` 在**非定稿帧上为 null**，仅在 `sentence_end=true` 的帧上非 null。
+- ✅ `sentence_id` **存在**（注意：长句内会长时间停在同一 id）。
+- ✅ `sentence_end` **会**出现 `true`，但**很稀疏**：连续朗读素材 49.5s 内仅 4 次定稿（与既有已知限制「连续不停顿语音 ~15-20s 强制定稿一次」一致）。
+- 结论：**Task 2 的服务端时间戳路径是活路径**；源无关模块保留「本地接收时间差」作为兜底即可。`end_time` 只在定稿帧读，与模块实现一致。
 
 - [ ] **Step 5: Commit**
 
