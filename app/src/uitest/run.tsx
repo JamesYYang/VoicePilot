@@ -70,6 +70,10 @@ export async function runUiTest() {
   // 记录真实传给 vp.copy 的那串文本。悬浮条界面上看不出「复制的内容对不对」——
   // 之前这里只查展示文本里有没有某个子串，所以 fullText 的换行错位一直没被抓到。
   const copyCtl: { text: string | null } = { text: null };
+  // 最近一次真桥 copy 的 Promise。本机剪贴板不可用时 real.copy 可能耗时数秒，
+  // 若不等它收尾，它的 setCopied(ok) 会晚于下一段「采纳」的 setCopied(true) 落地，
+  // 把 copied 又打回 false，掩盖 Finding 1 的重复提示回归。见第 22 段末尾的 await。
+  let lastCopy: Promise<boolean> = Promise.resolve(false);
   // 悬浮条（App）自己的润色流式监听器 holder。App 与 Studio 是两个独立的假
   // bridge（见下方 studioBridge），各存各的，不会互相覆盖。Task 5 之前 App 没
   // 订阅过这三个事件，缺了它们点「润色」后 delta 无处可发，测试永远红。
@@ -107,7 +111,8 @@ export async function runUiTest() {
     // 表现是「点了复制毫无反应」，且控制台没有一行相关报错。
     copy: (text: string) => {
       copyCtl.text = text;
-      return real.copy(text);
+      lastCopy = real.copy(text);
+      return lastCopy;
     },
     reportPainted: (at: number) => real.reportPainted(at),
     openStudio: (payload: { text: string; historyId?: number }) => {
@@ -753,6 +758,10 @@ export async function runUiTest() {
   clickButton('复制');
   await flush();
   check('复制取编辑后的文本', copyCtl.text === '我改过的文本', JSON.stringify(copyCtl.text));
+  // 等这次复制的 IPC 真正收尾（剪贴板不可用时 real.copy 可到数秒）。它若一直悬着，
+  // 其 setCopied(false) 会晚于下一段「采纳」的 setCopied(true) 落地，把 copied 打回
+  // false —— Finding 1 的重复提示回归断言会因此变成假绿（revert 也测不出来）。
+  await lastCopy;
 
   // 「编辑后回写同一条历史」的载荷断言：id 必须是 historySave 返回的 1（照抄
   // 假 bridge 的返回值，id 管线断了就能红），text 必须是**编辑后**的文本
@@ -772,14 +781,19 @@ export async function runUiTest() {
     { text: string; scene: Preset; tone: Preset; target?: 'bar' | 'studio' } | null;
   check('悬浮条发起的润色带 target=bar',
     barPolishFired?.target === 'bar', JSON.stringify(barPolishFired));
-  check('点润色后出现下半结果区',
-    container.querySelector('[data-testid="bar-polish-output"]') != null);
+  // Finding 3：刚发起、还没有任何 delta（也无错误）时不能渲染空盒子白占布局。
+  // 这是「面板只在有内容时渲染」的回归护栏，也解释了下面为何要先 fire delta
+  // 再断言面板存在 —— 空面板阶段它本就应该不存在。
+  check('未收到 delta 前不渲染空结果区（不占布局）',
+    container.querySelector('[data-testid="bar-polish-output"]') == null);
   check('润色中「润色」按钮禁用',
     container.querySelector<HTMLButtonElement>('[data-testid="bar-polish"]')?.disabled === true);
 
   barPolishDelta.cb?.({ text: '润色后的' });
   barPolishDelta.cb?.({ text: '第一句' });
   await flush();
+  check('有 delta 后出现下半结果区',
+    container.querySelector('[data-testid="bar-polish-output"]') != null);
   check('润色 delta 追加到下半区',
     container.querySelector('[data-testid="bar-polish-output"]')?.textContent === '润色后的第一句',
     JSON.stringify(container.querySelector('[data-testid="bar-polish-output"]')?.textContent));
@@ -788,6 +802,16 @@ export async function runUiTest() {
   await flush();
   copyCtl.text = null;
   adoptCall.payload = null;
+  // 下面「采纳成功提示区」的断言需要 vp.copy 真的返回 true 才会走到 setHint。
+  // 本机剪贴板不可用时（沙箱/远程会话，见前面 clipUsable）改成假成功，
+  // 否则该断言在无剪贴板环境恒红、也就抓不到 Finding 1 的重复提示回归 ——
+  // 与 section 6 的 clipUsable 分支同一理由。有剪贴板时仍走真实 IPC。
+  if (!clipUsable) {
+    bridge.copy = (text: string) => {
+      copyCtl.text = text;
+      return Promise.resolve(true);
+    };
+  }
   clickButton('采纳');
   await flush();
   // 同上：显式断言绕开流收窄，否则 adoptCall.payload 被判成 never
@@ -795,6 +819,21 @@ export async function runUiTest() {
   check('采纳取润色结果（不是编辑区原文）', copyCtl.text === '润色后的第一句', JSON.stringify(copyCtl.text));
   check('采纳把润色结果回写历史',
     barAdopted?.polished === '润色后的第一句', JSON.stringify(barAdopted));
+
+  // Finding 1：采纳成功只能有一条提示。断言**提示区节点**的精确文本，不是整容器
+  // 子串 —— bar.adopt.fallback（'已复制到剪贴板，请手动粘贴（自动写回尚未实现）'）
+  // 本身就包含 bar.copied 的子串 '已复制到剪贴板'，整容器 includes 两种状态都为真，
+  // 无法区分。这里键在节点数 + 每个节点的精确 textContent：若 adopt 又
+  // setCopied(true)，提示区会多出文本恰为 '已复制到剪贴板' 的节点，
+  // length===1 与「无节点精确等于 bar.copied」两条同时破，断言必红。
+  const adoptHintNodes = Array.from(
+    container.querySelectorAll('[data-testid="bar-hint"]')
+  ).map((n) => n.textContent);
+  check('采纳成功后提示区只有兜底一条、不含 bar.copied',
+    adoptHintNodes.length === 1 &&
+      adoptHintNodes[0] === '已复制到剪贴板，请手动粘贴（自动写回尚未实现）' &&
+      adoptHintNodes.every((s) => s !== '已复制到剪贴板'),
+    JSON.stringify(adoptHintNodes));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

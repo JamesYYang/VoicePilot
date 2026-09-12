@@ -380,7 +380,13 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     if (rounded === lastHeightRef.current) return;
     lastHeightRef.current = rounded;
     vp.resizeBar(rounded);
-  }, [draft, committed, snap, error, copied, edited, vp]);
+    // polishOut/polishing/polishError 必须在依赖里：润色面板的出现会挤压编辑区
+    // （编辑区 flex:1、minHeight:0，是唯一能让步的元素），不重新测量的话窗口
+    // 停在 148px 下限，编辑区被压到几乎为零、按钮行被裁。加入这三个后，面板
+    // 一出现就重新按溢出量向上长窗（仍受 BAR_MAX_HEIGHT 夹紧）——窗口长高 →
+    // clientHeight 变大 → overflow 变小即收敛；lastHeightRef 去重，且本组件
+    // 不监听 window resize，不会来回抖。
+  }, [draft, committed, snap, error, copied, edited, polishOut, polishing, polishError, vp]);
 
   const paragraphs = useMemo(() => {
     // 按 paraBreak 分组，渲染成段落。
@@ -440,7 +446,8 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     }
     const ok = await vp.copy(effectiveText);
     if (ok) {
-      setCopied(true);
+      // 只留 bar.adopt.fallback 一条提示：copied 归「复制」按钮独有，两条同时
+      // 显示会互相打架（ee1ab8a 删过一次，Task 5 的 brief 又带了回来）。
       setHint(t('bar.adopt.fallback'));
       return;
     }
@@ -459,7 +466,14 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     setPolishError(null);
     setHint('');
     setPolishing(true);
-    void vp.startPolish({ text: edited, scene, tone, target: 'bar' });
+    void vp
+      .startPolish({ text: edited, scene, tone, target: 'bar' })
+      .catch((e) => {
+        // 下发失败（IPC 拒绝/主进程未就绪）必须收尾，否则 polishing 永远为真，
+        // 「润色」按钮就此卡死禁用，还会冒成 unhandled rejection。
+        setPolishing(false);
+        setPolishError(e instanceof Error ? e.message : String(e));
+      });
   }, [edited, scene, tone, vp]);
 
   // idle 时什么都不渲染。窗口是透明的，不渲染就等于隐藏。
@@ -510,9 +524,11 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
         </div>
       )}
 
-      {/* 下半只读区：流式润色结果。有错误时优先显示错误（即使已无结果）。
+      {/* 下半只读区：流式润色结果。**只在真有内容时渲染** —— polishing 刚起、
+          还没收到任何 delta 时（也无错误）渲染一个空盒子只会白占布局，把编辑区
+          挤扁（Finding 3）。有错误时优先显示错误（即使已无结果）。
           在编辑区与按钮行之间，flex:'0 0 auto' 保证不会把编辑区压没。 */}
-      {snap.state === 'reviewing' && (polishing || polishOut.length > 0 || polishError) && (
+      {snap.state === 'reviewing' && (polishOut.length > 0 || polishError) && (
         <div data-testid="bar-polish-output" style={styles.output}>
           {polishError ? t('polish.errorPrefix') + polishError : polishOut}
         </div>
@@ -593,8 +609,16 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
         </>
       )}
 
-      {copied && <div style={styles.hint}>{t('bar.copied')}</div>}
-      {hint && <div style={styles.hint}>{hint}</div>}
+      {copied && (
+        <div data-testid="bar-hint" style={styles.hint}>
+          {t('bar.copied')}
+        </div>
+      )}
+      {hint && (
+        <div data-testid="bar-hint" style={styles.hint}>
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
