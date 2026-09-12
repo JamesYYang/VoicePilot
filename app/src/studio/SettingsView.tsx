@@ -101,11 +101,19 @@ function ShortcutSetting({ vp }: { vp: Window['voicepilot'] }) {
     return () => { alive = false; };
   }, [vp]);
 
-  // 录制：只在 recording 时监听 keydown；无法表达的键不提交，留在录制态
+  // 录制：只在 recording 时监听 keydown。Esc = 取消录制（不提交、直接退出录制态）；
+  // 其余无法表达的键不提交，留在录制态等用户重按
   useEffect(() => {
     if (!recording) return;
     const onKey = async (e: KeyboardEvent) => {
       e.preventDefault();
+      // Esc 是显式的取消路径：裸 Esc 无修饰键，acceleratorFromEvent 只会返回 null，
+      // 若按「无法表达的键」处理会一直留在录制态（全局快捷键也一直被挂起）。
+      if (e.key === 'Escape') {
+        setError('');
+        setRecording(false);
+        return;
+      }
       const next = acceleratorFromEvent(e);
       if (!next) {
         // 纯修饰键 / 无修饰键 / 媒体键等无法表达的键：不提交，留在录制态让用户重按

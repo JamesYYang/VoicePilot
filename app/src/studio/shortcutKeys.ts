@@ -2,7 +2,8 @@
  * 把键盘事件映射成 Electron accelerator 的键名。
  * 无法表达时返回 null —— 调用方必须据此拒绝，而不是把原始 e.key 拼进去。
  * 参考 Electron accelerator 支持的键名（Space / Up / Down / Left / Right / Return /
- * Tab / Backspace / Delete / Insert / Home / End / PageUp / PageDown / Esc / F1-F24 / Plus / Minus）。
+ * Tab / Backspace / Delete / Insert / Home / End / PageUp / PageDown / Esc / F1-F24 / Plus）。
+ * 减号没有 'Minus' 这个键名，必须用字面量 '-'（否则 register 会失败并被误报成冲突）。
  */
 const SPECIAL: Record<string, string> = {
   ' ': 'Space',
@@ -21,7 +22,7 @@ const SPECIAL: Record<string, string> = {
   PageDown: 'PageDown',
   Escape: 'Esc',
   '+': 'Plus',
-  '-': 'Minus',
+  '-': '-',
 };
 
 export interface KeyEventLike {

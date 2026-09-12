@@ -657,6 +657,21 @@ export async function runUiTest() {
   check('冲突时显示占用提示', conflictShown, JSON.stringify(settingsContainer.textContent));
   check('冲突时不更新当前显示的快捷键', accelEl() === 'Ctrl+Alt+Y', JSON.stringify(accelEl()));
 
+  // Esc = 取消录制：裸 Esc 无修饰键，若不特判只会走「无法表达的键」分支，
+  // 一直留在录制态（全局快捷键也一直被挂起）。这里必须能真的退出录制并恢复。
+  shortcutSet.payloads.length = 0;
+  settingsContainer.querySelector<HTMLButtonElement>('[data-testid="settings-shortcut-record"]')?.click();
+  await flush();
+  const suspendedBeforeEsc = suspendCalls[suspendCalls.length - 1] === true;
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  await flush();
+  check('Esc 取消录制：不调用 setShortcut',
+    shortcutSet.payloads.length === 0, JSON.stringify(shortcutSet.payloads));
+  check('Esc 取消录制：退出录制态恢复全局快捷键',
+    suspendedBeforeEsc && suspendCalls[suspendCalls.length - 1] === false,
+    JSON.stringify(suspendCalls));
+  check('Esc 取消录制：界面回到当前快捷键', accelEl() === 'Ctrl+Alt+Y', JSON.stringify(accelEl()));
+
   // ---- 22. 快捷键键名规范化（acceleratorFromEvent 纯函数）----
   // 这些值直接决定注册给 globalShortcut 的字符串；'Ctrl+ ' 之类非法值会让
   // register 抛异常，所以每个都按 Electron 真实键名逐条验一遍。
@@ -666,6 +681,10 @@ export async function runUiTest() {
     acceleratorFromEvent({ key: 'ArrowUp', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === 'Ctrl+Up');
   check('加号归一化为 Ctrl+Plus',
     acceleratorFromEvent({ key: '+', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === 'Ctrl+Plus');
+  // 减号没有 'Minus' 这个 Electron 键名，必须是字面量 '-'；映射错了 register 会失败
+  // 并被上层误报成「该快捷键已被占用」。
+  check('减号归一化为 Ctrl+-（Electron 无 Minus 键名）',
+    acceleratorFromEvent({ key: '-', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === 'Ctrl+-');
   check('字母多修饰键归一化为 Ctrl+Alt+Y',
     acceleratorFromEvent({ key: 'y', ctrlKey: true, altKey: true, shiftKey: false, metaKey: false }) === 'Ctrl+Alt+Y');
   check('功能键归一化为 Ctrl+F5',

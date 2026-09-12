@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, globalShortcut } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { t } from '../shared/i18n/index.js';
@@ -46,6 +46,10 @@ export function createStudioWindow({ attachDevLogging }) {
   studioWin.loadURL('app://voicepilot/index.html#studio');
   studioWin.on('closed', () => {
     studioWin = null;
+    // 兜底：录制快捷键时主进程会 setSuspended(true)，而窗口被销毁时渲染进程的
+    // effect cleanup 不会运行 —— 不在这里恢复的话，全局热键会被永久挂起
+    // （应用还在托盘里跑，不会重启）。
+    globalShortcut.setSuspended(false);
     if (process.platform === 'darwin' && !BrowserWindow.getAllWindows().some((w) => w.isFocusable())) {
       app.setActivationPolicy('accessory');
     }
