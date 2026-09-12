@@ -230,3 +230,17 @@ export function setMeta(key, value) {
   db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
     .run(key, String(value));
 }
+
+// ---------------------------------------------------------------- 快捷键
+
+const SHORTCUT_KEY = 'shortcut';
+
+/** 用户自定义的全局快捷键（Electron accelerator）。未设置返回 null，调用方用默认值。 */
+export function getShortcut() {
+  const v = getMeta(SHORTCUT_KEY);
+  return v && v.trim() ? v : null;
+}
+
+export function setShortcut(accel) {
+  setMeta(SHORTCUT_KEY, String(accel));
+}

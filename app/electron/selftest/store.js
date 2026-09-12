@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   openStore, openStoreWithDb, saveHistory, listHistory, getHistory, updateHistoryPolish,
   deleteHistory, listPresets, savePreset, deletePreset, getMeta, setMeta, migrateDefaultScene,
+  getShortcut, setShortcut,
 } from '../store.js';
 
 export async function runStoreSelftest() {
@@ -102,9 +103,17 @@ export async function runStoreSelftest() {
   const okMigrateBackfillIdem =
     again?.name_zh_cn === '文档' && again?.name_zh_tw === '文檔' && again?.name_en === 'Document';
 
+  // 快捷键读写：未设置返回 null；设置后可读回；覆盖写生效
+  const okShortcutDefault = getShortcut() === null;
+  setShortcut('CommandOrControl+Alt+Space');
+  const okShortcutSet = getShortcut() === 'CommandOrControl+Alt+Space';
+  setShortcut('CommandOrControl+Shift+K');
+  const okShortcutOverwrite = getShortcut() === 'CommandOrControl+Shift+K';
+
   const ok = okSeed && okWrite && okUpdate && okDelHistory && okDelGone && okDelMissing && okAdd && okEdit && okBuiltinKeep && okDel && okMeta && okTrilingual &&
     okMigrateMiss && okMigrateHit && okMigrateIdem &&
-    okMigrateBackfill && okMigrateList && okMigrateBackfillIdem;
-  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem}`);
+    okMigrateBackfill && okMigrateList && okMigrateBackfillIdem &&
+    okShortcutDefault && okShortcutSet && okShortcutOverwrite;
+  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem} 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite}`);
   return { ok };
 }
