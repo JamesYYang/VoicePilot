@@ -262,6 +262,11 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:shortcut/set', accel);
   },
 
+  /** 录制期间挂起 / 恢复全局快捷键，避免按下的组合键触发一次听写。 */
+  suspendShortcut(suspended) {
+    return ipcRenderer.invoke('vp:shortcut/suspend', suspended);
+  },
+
   // ---------------------------------------------------------------- 权限（F12）
 
   /** macOS 辅助功能授权状态。非 macOS 返回 {accessibility: null}。 */

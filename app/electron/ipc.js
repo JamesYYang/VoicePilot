@@ -25,7 +25,7 @@ import { streamPolish } from './llm/polish.js';
 let pendingStudioText = '';
 let pendingHistoryId = null;
 
-export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, rebuildTray, applyShortcut, currentAccel, defaultAccel }) {
+export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, rebuildTray, applyShortcut, currentAccel, defaultAccel, setShortcutSuspended }) {
   /**
    * 主进程 → 渲染进程。
    * 悬浮条可能还没加载完，也可能已被关闭，发送前必须检查。
@@ -139,6 +139,15 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     const ok = applyShortcut(machine, next);
     if (ok) setShortcut(next);
     return { ok, accel: currentAccel() };
+  });
+
+  /**
+   * 录制期间挂起 / 恢复全局快捷键。挂起后按下的组合键不会被当成听写，
+   * 只会被渲染进程的录制控件捕获。见 main.js 的 setShortcutSuspended。
+   */
+  ipcMain.handle('vp:shortcut/suspend', (_e, suspended) => {
+    setShortcutSuspended(Boolean(suspended));
+    return true;
   });
 
   /** 界面自测跑完：把成败变成进程退出码，便于脚本/CI 判断。 */

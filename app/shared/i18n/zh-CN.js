@@ -72,6 +72,7 @@ export const zhCN = {
   'settings.shortcut.reset': '恢复默认',
   'settings.shortcut.conflict': '该快捷键已被占用，请换一个',
   'settings.shortcut.hint': '按下组合键即可修改全局听写快捷键',
+  'settings.shortcut.unsupported': '这个按键不能用作快捷键，请换一个',
   // 欢迎页
   'onboarding.titlePrefix': '欢迎使用',
   'onboarding.intro': '按 {{shortcut}} 开始语音输入，说完自动生成文字，可一键复制或润色。',

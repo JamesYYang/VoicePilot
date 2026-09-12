@@ -66,6 +66,7 @@ export const enUS = {
   'settings.shortcut.reset': 'Reset to default',
   'settings.shortcut.conflict': 'That shortcut is taken. Try another.',
   'settings.shortcut.hint': 'Press a key combination to change the global dictation shortcut',
+  'settings.shortcut.unsupported': 'That key cannot be used in a shortcut. Try another.',
   'onboarding.titlePrefix': 'Welcome to',
   'onboarding.intro': 'Press {{shortcut}} to start voice input. Your speech becomes text — copy or polish in one click.',
   'onboarding.permissionMac': 'Allow Microphone access in System Settings, and enable VoicePilot under Privacy & Security → Accessibility (required for the global shortcut).',

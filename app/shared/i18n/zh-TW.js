@@ -66,6 +66,7 @@ export const zhTW = {
   'settings.shortcut.reset': '恢復預設',
   'settings.shortcut.conflict': '該快捷鍵已被佔用，請換一個',
   'settings.shortcut.hint': '按下組合鍵即可修改全域聽寫快捷鍵',
+  'settings.shortcut.unsupported': '這個按鍵不能用作快捷鍵，請換一個',
   'onboarding.titlePrefix': '歡迎使用',
   'onboarding.intro': '按 {{shortcut}} 開始語音輸入，說完自動產生文字，可一鍵複製或潤色。',
   'onboarding.permissionMac': '請在系統設定中允許「麥克風」權限，並在「隱私與安全性 → 輔助功能」中允許 VoicePilot（全域快捷鍵需要）。',

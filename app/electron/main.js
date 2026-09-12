@@ -19,7 +19,7 @@ import { createStudioWindow } from './studio.js';
 import { createOnboardingWindow } from './onboarding.js';
 import { createKeyEntryWindow } from './key-entry.js';
 import { bootstrapCredentials, refreshFromEndpoint } from './asr/config.js';
-import { getMeta, getShortcut, setShortcut } from './store.js';
+import { getMeta, getShortcut } from './store.js';
 import { t } from '../shared/i18n/index.js';
 import { getCurrentLocale } from './locale.js';
 
@@ -425,26 +425,58 @@ function currentAccel() {
 let boundAccel = null;
 
 /**
- * 注销旧的、注册新的。返回是否成功。
- * 失败（被别的程序占用）时不改 store —— 保持「当前生效键」与「已存键」一致。
+ * 注册新键、成功后才注销旧键。返回是否成功。
+ * 失败（被别的程序占用，或 accelerator 非法）时不改 store ——
+ * 保持「当前生效键」与「已存键」一致。
+ *
+ * 之所以「先注册、后注销」：globalShortcut.register 对非法 accelerator
+ * （如 'Ctrl+ '）会**抛异常**而不是返回 false。旧实现先注销再注册，一旦抛异常
+ * 就直接逃逸，回滚分支永不执行 —— 结果是旧热键失效、boundAccel 还指着旧键、
+ * 渲染进程只看到 {ok:false}。先注册后注销从结构上杜绝「一个键都没有」。
  */
 function applyShortcut(machine, accel) {
-  if (boundAccel) globalShortcut.unregister(boundAccel);
-  const ok = globalShortcut.register(accel, () => {
+  const prev = boundAccel;
+
+  const handler = () => {
     // 直接驱动状态机，不再经渲染进程转发（状态只有一个源头）
     void machine.toggle();
-  });
+  };
+
+  let ok = false;
+  try {
+    ok = globalShortcut.register(accel, handler);
+  } catch (e) {
+    // 非法 accelerator 走这里。当成注册失败处理，旧键未被注销，仍然生效。
+    console.error(`[快捷键] ${accel} 注册异常：${e?.message ?? e}`);
+    ok = false;
+  }
+
+  // 重录当前键：重复注册必然返回 false，但它本来就在生效 —— 视为成功，避免误报冲突。
+  // boundAccel 只会指向注册成功的键，所以这里不需要再查 isRegistered
+  // （挂起态下该查询的语义也不一定可靠）。
+  if (!ok && prev === accel) return true;
+
   if (ok) {
+    if (prev && prev !== accel) globalShortcut.unregister(prev);
     boundAccel = accel;
     console.log(`[快捷键] ${accel} 已注册`);
   } else {
-    // 注册失败：回滚到上一个可用键，避免出现「一个键都没有」
     console.error(`[快捷键] ${accel} 注册失败：可能已被其他程序占用`);
-    if (boundAccel) {
-      globalShortcut.register(boundAccel, () => void machine.toggle());
-    }
+    boundAccel = prev; // 旧键从未被注销，仍指向它
   }
   return ok;
+}
+
+/**
+ * 挂起 / 恢复全局快捷键。
+ *
+ * 录制新快捷键时必须挂起：OS 级全局快捷键在应用自己的窗口有焦点时也会触发，
+ * preventDefault 拦不住 —— 不挂起的话，用户按下的组合键会被主进程当成一次
+ * 听写（同时又被写进绑定）。Electron 44 的 globalShortcut.setSuspended 正在
+ * 为此设计（见 electron.d.ts）。设置页只在录制期间调用它。
+ */
+function setShortcutSuspended(suspended) {
+  globalShortcut.setSuspended(Boolean(suspended));
 }
 
 
@@ -465,6 +497,7 @@ app.whenReady().then(async () => {
     applyShortcut,
     currentAccel,
     defaultAccel,
+    setShortcutSuspended,
   });
 
   // 前两个自测都是「不建窗口、跑完就退」，可以在无人值守的机器上跑，
@@ -506,7 +539,14 @@ app.whenReady().then(async () => {
 
   createBar();
   createTray();
-  applyShortcut(machine, currentAccel());
+  // 启动注册快捷键：store 里的值可能损坏（非法 accelerator 会让 register 抛异常）。
+  // 绝不能让异常冒泡 —— 它后面还有凭据、引导窗等启动步骤，抛出去就全被跳过。
+  // applyShortcut 内部已 try/catch，这里再兜一层，纯粹为了启动序列万无一失。
+  try {
+    applyShortcut(machine, currentAccel());
+  } catch (e) {
+    console.error(`[快捷键] 启动注册失败：${e?.message ?? e}`);
+  }
 
   // 凭据来源：.env（仅开发）→ 本地缓存 → 内网端点。开发期有 .env 时上面两步都不碰端点。
   const boot = await bootstrapCredentials();

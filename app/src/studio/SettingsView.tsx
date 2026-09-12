@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useT, useLocale } from '../i18n';
 import type { Locale } from '../../shared/i18n/index.js';
+import { acceleratorFromEvent } from './shortcutKeys';
 
 /**
  * 设置页（F12）—— 语言选择器 + 「权限」区块（macOS 辅助功能授权状态 + 分步引导）。
@@ -100,20 +101,17 @@ function ShortcutSetting({ vp }: { vp: Window['voicepilot'] }) {
     return () => { alive = false; };
   }, [vp]);
 
-  // 录制：只在 recording 时监听 keydown；忽略纯修饰键本身
+  // 录制：只在 recording 时监听 keydown；无法表达的键不提交，留在录制态
   useEffect(() => {
     if (!recording) return;
     const onKey = async (e: KeyboardEvent) => {
       e.preventDefault();
-      const mods: string[] = [];
-      if (e.ctrlKey) mods.push('Ctrl');
-      if (e.altKey) mods.push('Alt');
-      if (e.shiftKey) mods.push('Shift');
-      if (e.metaKey) mods.push('Super');
-      const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
-      const isModifierOnly = ['Control', 'Alt', 'Shift', 'Meta'].includes(e.key);
-      if (isModifierOnly || mods.length === 0) return;
-      const next = [...mods, key].join('+');
+      const next = acceleratorFromEvent(e);
+      if (!next) {
+        // 纯修饰键 / 无修饰键 / 媒体键等无法表达的键：不提交，留在录制态让用户重按
+        setError(t('settings.shortcut.unsupported'));
+        return;
+      }
       setRecording(false);
       const r = await vp.setShortcut(next).catch(() => ({ ok: false, accel }));
       if (r.ok) { setAccel(r.accel); setError(''); }
@@ -122,6 +120,15 @@ function ShortcutSetting({ vp }: { vp: Window['voicepilot'] }) {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [recording, vp, t, accel]);
+
+  // 录制期间挂起全局快捷键：OS 级快捷键在本应用窗口有焦点时照样触发，
+  // preventDefault 拦不住 —— 不挂起的话，用户按下的组合键会被主进程当成
+  // 一次听写，同时又被写进绑定。清理函数保证离开录制或组件卸载时一定恢复。
+  useEffect(() => {
+    if (!recording) return;
+    void vp.suspendShortcut(true);
+    return () => { void vp.suspendShortcut(false); };
+  }, [recording, vp]);
 
   return (
     <div style={styles.block}>

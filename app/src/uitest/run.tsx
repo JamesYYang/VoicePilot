@@ -4,6 +4,7 @@ import Studio from '../studio/Studio';
 import SettingsView from '../studio/SettingsView';
 import { I18nProvider } from '../i18n';
 import { ParagraphSegmenter, breakThresholdMs, median } from '../segment/segmenter';
+import { acceleratorFromEvent } from '../studio/shortcutKeys';
 
 /**
  * 悬浮条界面自测。用法：
@@ -584,6 +585,7 @@ export async function runUiTest() {
   document.body.appendChild(settingsContainer);
 
   const shortcutSet: { payloads: string[] } = { payloads: [] };
+  const suspendCalls: boolean[] = [];
   const settingsBridge = {
     ...real,
     // contextBridge 属性不可枚举，展开复制不到，用到的必须显式声明
@@ -597,6 +599,10 @@ export async function runUiTest() {
       shortcutSet.payloads.push(a);
       return Promise.resolve({ ok: true, accel: a });
     },
+    suspendShortcut: (s: boolean) => {
+      suspendCalls.push(s);
+      return Promise.resolve(true);
+    },
   };
 
   createRoot(settingsContainer).render(<SettingsView bridge={settingsBridge} />);
@@ -609,11 +615,16 @@ export async function runUiTest() {
 
   recBtn?.click();
   await flush();
+  // 进入录制后必须挂起全局快捷键，否则按下的组合键会被主进程当成一次听写
+  check('进入录制时挂起全局快捷键', suspendCalls[0] === true, JSON.stringify(suspendCalls));
+
   // 录制态：派发一个带修饰键的 keydown（捕获阶段监听，派发到 window 即可命中）
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, altKey: true }));
   await flush();
   check('录制后调用 setShortcut 且载荷正确', shortcutSet.payloads[0] === 'Ctrl+Alt+Y',
     JSON.stringify(shortcutSet.payloads));
+  check('录制结束（提交）时恢复全局快捷键',
+    suspendCalls[suspendCalls.length - 1] === false, JSON.stringify(suspendCalls));
   const shownUpdated = await waitFor(() => accelEl() === 'Ctrl+Alt+Y');
   check('成功后界面显示新快捷键', shownUpdated, JSON.stringify(accelEl()));
 
@@ -623,7 +634,9 @@ export async function runUiTest() {
   // 所以换个实现即可模拟主进程注册失败，不需要重挂组件。
   settingsBridge.setShortcut = (a: string) => {
     shortcutSet.payloads.push(a);
-    return Promise.resolve({ ok: false, accel: 'Ctrl+Alt+Y' });
+    // 返回**候选值**而非当前显示值：这样「组件错误地把失败响应的 accel 应用上去」
+    // 会让下面的「不更新当前显示」断言失败，断言才有鉴别力。
+    return Promise.resolve({ ok: false, accel: 'Ctrl+Alt+K' });
   };
 
   settingsContainer.querySelector<HTMLButtonElement>('[data-testid="settings-shortcut-record"]')?.click();
@@ -643,6 +656,26 @@ export async function runUiTest() {
     settingsContainer.textContent?.includes('该快捷键已被占用，请换一个') === true);
   check('冲突时显示占用提示', conflictShown, JSON.stringify(settingsContainer.textContent));
   check('冲突时不更新当前显示的快捷键', accelEl() === 'Ctrl+Alt+Y', JSON.stringify(accelEl()));
+
+  // ---- 22. 快捷键键名规范化（acceleratorFromEvent 纯函数）----
+  // 这些值直接决定注册给 globalShortcut 的字符串；'Ctrl+ ' 之类非法值会让
+  // register 抛异常，所以每个都按 Electron 真实键名逐条验一遍。
+  check('Space 归一化为 Ctrl+Space',
+    acceleratorFromEvent({ key: ' ', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === 'Ctrl+Space');
+  check('ArrowUp 归一化为 Ctrl+Up',
+    acceleratorFromEvent({ key: 'ArrowUp', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === 'Ctrl+Up');
+  check('加号归一化为 Ctrl+Plus',
+    acceleratorFromEvent({ key: '+', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === 'Ctrl+Plus');
+  check('字母多修饰键归一化为 Ctrl+Alt+Y',
+    acceleratorFromEvent({ key: 'y', ctrlKey: true, altKey: true, shiftKey: false, metaKey: false }) === 'Ctrl+Alt+Y');
+  check('功能键归一化为 Ctrl+F5',
+    acceleratorFromEvent({ key: 'F5', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === 'Ctrl+F5');
+  check('纯修饰键返回 null',
+    acceleratorFromEvent({ key: 'Control', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === null);
+  check('无修饰键返回 null',
+    acceleratorFromEvent({ key: 'y', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }) === null);
+  check('无法表达的键（媒体键）返回 null',
+    acceleratorFromEvent({ key: 'AudioVolumeUp', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }) === null);
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

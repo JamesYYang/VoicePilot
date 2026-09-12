@@ -77,6 +77,8 @@ interface VoicePilotBridge {
   getShortcut(): Promise<{ accel: string; isDefault: boolean }>;
   /** 设置全局快捷键。冲突时 ok:false 且不生效。 */
   setShortcut(accel: string): Promise<{ ok: boolean; accel: string }>;
+  /** 录制快捷键期间挂起 / 恢复全局快捷键，避免组合键触发一次听写。 */
+  suspendShortcut(suspended: boolean): Promise<boolean>;
 
   // —— 主应用（Studio）——
   /** 打开主应用并带入待润色文本 */
