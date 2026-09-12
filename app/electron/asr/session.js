@@ -22,6 +22,13 @@ import { ensureSystemCa } from '../tls-ca.js';
  *        → finish-task → 继续收 result-generated → [task-finished] → 关闭
  */
 
+// 诊断开关：VP_ASR_DEBUG=1 时打印原始 sentence 对象。用于核实新模型是否返回
+// begin_time/end_time/sentence_id —— 分段判据依赖它们是否存在。默认关闭，
+// 且每会话最多打 20 条，避免长口述把终端刷爆。
+const DEBUG_ASR = !!process.env.VP_ASR_DEBUG;
+const DEBUG_LIMIT = 20;
+let debugCount = 0;
+
 const DEFAULT_TIMEOUTS = {
   handshake: 15000, // 等 ws open
   taskStarted: 15000, // 等 task-started
@@ -152,6 +159,10 @@ export class AsrSession {
         this.#handlers.onLifecycle?.({ type: 'task-started', recvAtMs });
       } else if (event === 'result-generated') {
         const s = msg.payload?.output?.sentence ?? {};
+        if (DEBUG_ASR && debugCount < DEBUG_LIMIT) {
+          debugCount += 1;
+          console.log(`[ASR原始 ${debugCount}] ${JSON.stringify(s)}`);
+        }
         // 心跳与「无文本无字」的空事件必须过滤：句首标记与静音段都会产生它们，
         // 留着只会虚增中间更新次数，让延迟统计失真（spike 里已踩过）。
         if (s.heartbeat) return;
