@@ -8,7 +8,7 @@ import { createStudioWindow, getStudioWindow } from './studio.js';
 import { getOnboardingWindow } from './onboarding.js';
 import { getKeyEntryWindow } from './key-entry.js';
 import { saveCredentials } from './asr/config.js';
-import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, deleteHistory, getShortcut, setShortcut } from './store.js';
+import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, updateHistoryText, deleteHistory, getShortcut, setShortcut } from './store.js';
 import { streamPolish } from './llm/polish.js';
 import { applyShortcut, currentAccel, defaultAccel, setShortcutSuspended } from './shortcut.js';
 
@@ -272,6 +272,14 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
 
   /** 删除一条历史。返回是否真的删掉了。 */
   ipcMain.handle('vp:history/delete', (_e, id) => deleteHistory(Number(id)));
+
+  /** 编辑后更新同一条历史的正文。悬浮条在采纳/复制/关闭时调用。 */
+  ipcMain.handle('vp:history/update-text', (_e, { id, text }) => {
+    const n = Number(id);
+    if (!Number.isFinite(n)) return false;
+    updateHistoryText(n, String(text ?? ''));
+    return true;
+  });
 
   /** 采用润色结果：把润色文本 + 场景/语气回写进本次会话的历史条目。 */
   ipcMain.handle('vp:polish/adopt', (_e, { polished, scene, tone }) => {

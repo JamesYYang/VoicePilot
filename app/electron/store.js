@@ -174,6 +174,12 @@ export function updateHistoryPolish(id, { polished, scene, tone }) {
     .run(polished ?? null, scene ?? null, tone ?? null, id);
 }
 
+/** 编辑后更新正文。只改 text，不动 id / created_at / 润色字段。 */
+export function updateHistoryText(id, text) {
+  openStore();
+  db.prepare('UPDATE history SET text = ? WHERE id = ?').run(text, id);
+}
+
 // ---------------------------------------------------------------- 预设
 
 export function listPresets(kind, locale = 'zh-CN') {

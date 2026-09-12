@@ -91,6 +91,8 @@ interface VoicePilotBridge {
   historyGet(id: number): Promise<HistoryRow | null>;
   /** 删除一条历史，返回是否真的删掉了 */
   historyDelete(id: number): Promise<boolean>;
+  /** 编辑后更新同一条历史的正文 */
+  historyUpdateText(payload: { id: number; text: string }): Promise<boolean>;
   /** 采用润色结果，回写历史 */
   adoptPolish(payload: { polished: string; scene: string; tone: string }): Promise<boolean>;
   /** 主应用挂载时拉 {text, scenes, tones, defaultSceneId} */

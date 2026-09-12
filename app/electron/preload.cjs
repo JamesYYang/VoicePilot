@@ -205,6 +205,11 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:history/delete', id);
   },
 
+  /** 编辑后更新同一条历史的正文。 */
+  historyUpdateText(payload) {
+    return ipcRenderer.invoke('vp:history/update-text', payload);
+  },
+
   /** 采用润色结果，回写历史。 */
   adoptPolish(payload) {
     return ipcRenderer.invoke('vp:polish/adopt', payload);

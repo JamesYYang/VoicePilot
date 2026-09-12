@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import {
   openStore, openStoreWithDb, saveHistory, listHistory, getHistory, updateHistoryPolish,
+  updateHistoryText,
   deleteHistory, listPresets, savePreset, deletePreset, getMeta, setMeta, migrateDefaultScene,
   getShortcut, setShortcut,
 } from '../store.js';
@@ -110,10 +111,20 @@ export async function runStoreSelftest() {
   setShortcut('CommandOrControl+Shift+K');
   const okShortcutOverwrite = getShortcut() === 'CommandOrControl+Shift+K';
 
+  // 编辑后更新同一条历史的正文（不改 id / duration_ms / created_at）
+  const { id: editId } = saveHistory({ text: '原始正文', durationMs: 1000 });
+  updateHistoryText(editId, '改过的正文');
+  const edited = getHistory(editId);
+  const okUpdateText =
+    edited?.text === '改过的正文' &&
+    edited?.id === editId &&
+    edited?.duration_ms === 1000;
+
   const ok = okSeed && okWrite && okUpdate && okDelHistory && okDelGone && okDelMissing && okAdd && okEdit && okBuiltinKeep && okDel && okMeta && okTrilingual &&
     okMigrateMiss && okMigrateHit && okMigrateIdem &&
     okMigrateBackfill && okMigrateList && okMigrateBackfillIdem &&
-    okShortcutDefault && okShortcutSet && okShortcutOverwrite;
-  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem} 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite}`);
+    okShortcutDefault && okShortcutSet && okShortcutOverwrite &&
+    okUpdateText;
+  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem} 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite} 更新正文=${okUpdateText}`);
   return { ok };
 }
