@@ -170,6 +170,11 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:preset/list', kind);
   },
 
+  /** 悬浮条润色所需的预设（不含文本）。 */
+  polishPresets() {
+    return ipcRenderer.invoke('vp:polish/presets');
+  },
+
   /** 新建/编辑预设。 */
   savePreset(payload) {
     return ipcRenderer.invoke('vp:preset/save', payload);

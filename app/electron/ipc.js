@@ -232,14 +232,30 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
   ipcMain.handle('vp:preset/delete', (_e, id) => deletePreset(Number(id)));
 
   /**
+   * 悬浮条润色所需的预设。与 vp:studio/sync 同款数据，但不带文本 ——
+   * 悬浮条的文本归渲染进程所有，不需要（也不应该）经过主进程转发。
+   */
+  ipcMain.handle('vp:polish/presets', () => {
+    const locale = getCurrentLocale();
+    return {
+      scenes: listPresets('scene', locale),
+      tones: listPresets('tone', locale),
+      defaultSceneId: getMeta('default_scene_id') ? Number(getMeta('default_scene_id')) : null,
+    };
+  });
+
+  /**
    * 润色入口（Task 5）：调用 streamPolish 流式润色，delta 逐块推回渲染进程。
    * 结果走三个事件：vp:polish/delta（增量）/ done（收尾）/ error（失败）。
    */
-  ipcMain.handle('vp:polish/start', async (_e, { text, scene, tone }) => {
+  ipcMain.handle('vp:polish/start', async (_e, { text, scene, tone, target }) => {
     // last-used 默认场景：记住本次润色用的场景 id（稳定，不随 locale 变），
     // 下次打开默认选中。独立 try 避免影响润色本身。
     try { if (scene?.id != null) setMeta('default_scene_id', scene.id); } catch {}
-    const win = getStudioWindow();
+
+    // 事件发给发起方所在窗口。悬浮条内润色（target='bar'）必须回到悬浮条，
+    // 否则流式结果发到主应用窗口，悬浮条下半栏永远空白。
+    const win = target === 'bar' ? getBar() : getStudioWindow();
     const emit = (channel, payload) => win?.webContents.send(channel, payload);
 
     try {
