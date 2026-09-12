@@ -10,6 +10,7 @@ import { getKeyEntryWindow } from './key-entry.js';
 import { saveCredentials } from './asr/config.js';
 import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, deleteHistory, getShortcut, setShortcut } from './store.js';
 import { streamPolish } from './llm/polish.js';
+import { applyShortcut, currentAccel, defaultAccel, setShortcutSuspended } from './shortcut.js';
 
 /**
  * 所有 IPC 的注册点。main.js 只管应用外壳（窗口、托盘、快捷键、生命周期），
@@ -25,7 +26,7 @@ import { streamPolish } from './llm/polish.js';
 let pendingStudioText = '';
 let pendingHistoryId = null;
 
-export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, rebuildTray, applyShortcut, currentAccel, defaultAccel, setShortcutSuspended }) {
+export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, rebuildTray }) {
   /**
    * 主进程 → 渲染进程。
    * 悬浮条可能还没加载完，也可能已被关闭，发送前必须检查。
@@ -131,7 +132,7 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
 
   /**
    * 设置快捷键。成功则落库并重注册；失败（冲突）返回 ok:false 且不改动。
-   * 需要 main.js 传进来的 applyShortcut / defaultAccel。
+   * 注册逻辑见 shortcut.js。
    */
   ipcMain.handle('vp:shortcut/set', (_e, accel) => {
     const next = String(accel ?? '').trim();
@@ -143,7 +144,7 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
 
   /**
    * 录制期间挂起 / 恢复全局快捷键。挂起后按下的组合键不会被当成听写，
-   * 只会被渲染进程的录制控件捕获。见 main.js 的 setShortcutSuspended。
+   * 只会被渲染进程的录制控件捕获。见 shortcut.js 的 setShortcutSuspended。
    */
   ipcMain.handle('vp:shortcut/suspend', (_e, suspended) => {
     setShortcutSuspended(Boolean(suspended));

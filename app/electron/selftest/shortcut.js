@@ -1,0 +1,67 @@
+import { globalShortcut } from 'electron';
+import { applyShortcut, boundShortcut, defaultAccel, setShortcutSuspended } from '../shortcut.js';
+
+/**
+ * 全局快捷键注册的回归自测。
+ *
+ * 用真实的 globalShortcut（headless Electron 进程能注册，已实测），
+ * 只借三个冷门组合键 Control+Alt+Shift+F9/F10/F11，跑完立刻 unregisterAll。
+ */
+export async function runShortcutSelftest() {
+  console.log('[自测] 全局快捷键（shortcut）');
+
+  const A = 'Control+Alt+Shift+F9';
+  const B = 'Control+Alt+Shift+F10';
+  const C = 'Control+Alt+Shift+F11';
+  const fakeMachine = { toggle() {} };
+
+  // 纯函数默认值：Windows 不能用 Alt+Space（系统菜单）/ Win+Space（输入法切换）
+  const okDefault = defaultAccel('darwin') === 'Alt+Space' && defaultAccel('win32') === 'Ctrl+Shift+Space';
+
+  // ---- 1. 首次注册：成功且真的注册上了 ----
+  const okFirst = applyShortcut(fakeMachine, A) === true && globalShortcut.isRegistered(A) === true;
+
+  // ---- 2. 重录当前键：重复注册必然返回 false，但应视为成功（避免误报冲突）----
+  const okRerecord = applyShortcut(fakeMachine, A) === true && boundShortcut() === A;
+
+  // ---- 3. 换键：新键生效、旧键被注销 ----
+  const okReplace =
+    applyShortcut(fakeMachine, B) === true &&
+    globalShortcut.isRegistered(B) === true &&
+    globalShortcut.isRegistered(A) === false;
+
+  // ---- 4. 回归：挂起态下改键 ----
+  // 设置页录制时主进程处于 setSuspended(true)，此时 register 必然返回 false。
+  // applyShortcut 必须先恢复挂起态再注册，否则每次改键都会误报「已被其他程序占用」。
+  setShortcutSuspended(true);
+  const okSuspendedApply = applyShortcut(fakeMachine, C) === true;
+  const okSuspendedRegistered = globalShortcut.isRegistered(C) === true;
+  // 挂起态必须已被 applyShortcut 解除：A 在用例 3 里随 B 的注册被注销，此刻空闲，
+  // 若管理器仍处于挂起态，这次 register 会失败 → 用例变红。
+  const okResumedAfter = applyShortcut(fakeMachine, A) === true && globalShortcut.isRegistered(A) === true;
+
+  // ---- 5. 非法 accelerator：注册失败但不得毁掉已生效的键 ----
+  // register 对 'Ctrl+ ' 会抛异常（而非返回 false），applyShortcut 必须接住，
+  // 且因为「先注册后注销」，旧键 A 从未被注销 —— 仍然生效。
+  let okMalformed = false;
+  try {
+    okMalformed = applyShortcut(fakeMachine, 'Ctrl+ ') === false;
+  } catch {
+    okMalformed = false; // 异常逃出 applyShortcut 即失败
+  }
+  const okMalformedKeepsBinding =
+    globalShortcut.isRegistered(A) === true && boundShortcut() === A;
+
+  globalShortcut.unregisterAll();
+
+  const ok =
+    okDefault && okFirst && okRerecord && okReplace &&
+    okSuspendedApply && okSuspendedRegistered && okResumedAfter &&
+    okMalformed && okMalformedKeepsBinding;
+  console.log(
+    `[自测] ${ok ? '通过' : '失败'} 默认值=${okDefault} 首次=${okFirst} 重录=${okRerecord} 换键=${okReplace} ` +
+    `挂起注册=${okSuspendedApply} 挂起后已注册=${okSuspendedRegistered} 恢复=${okResumedAfter} ` +
+    `非法键=${okMalformed} 非法键不毁旧键=${okMalformedKeepsBinding}`
+  );
+  return { ok };
+}
