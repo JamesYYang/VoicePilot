@@ -33,7 +33,7 @@ const ERROR_HOLD_MS = 5000;
 
 /** 悬浮条窗口高度的上下限（与 electron/main.js 的 BAR / BAR_MAX_HEIGHT 对应）。 */
 const BAR_MIN_HEIGHT = 148;
-const BAR_MAX_HEIGHT = 420;
+const BAR_MAX_HEIGHT = 620;
 
 type SessionState = 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing';
 

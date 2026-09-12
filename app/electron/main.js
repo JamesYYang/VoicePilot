@@ -43,7 +43,8 @@ const RENDERER_DIR = resolve(join(ROOT, 'dist', 'renderer'));
 // 悬浮条尺寸。PRD §1.2：桌面右下角、半透明、置顶。
 const BAR = { width: 560, height: 148, margin: 24 };
 // 长文本时悬浮条自动长高的上限。避免一句说太长把窗口拉得变形。
-const BAR_MAX_HEIGHT = 420;
+// reviewing 态还要放编辑区 + 5 个按钮 + 折叠区（+ 润色分栏），420 装不下。
+const BAR_MAX_HEIGHT = 620;
 
 let tray = null;
 let bar = null;

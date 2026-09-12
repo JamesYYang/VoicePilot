@@ -33,7 +33,14 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
    */
   const emit = (channel, payload) => {
     const bar = getBar();
-    if (bar && !bar.isDestroyed()) bar.webContents.send(channel, payload);
+    if (!bar || bar.isDestroyed()) return;
+    // 只有 reviewing 需要键盘输入（编辑区）。聆听三态必须保持不可聚焦，
+    // 否则「不抢焦点」（A2）就破了 —— 那是这个程序最硬的约束。
+    // 注意这里**不调用 focus()**：切成可聚焦只是允许用户点击进来。
+    if (channel === 'vp:state') {
+      bar.setFocusable(payload?.state === 'reviewing');
+    }
+    bar.webContents.send(channel, payload);
   };
 
   function broadcastLocale(locale) {
