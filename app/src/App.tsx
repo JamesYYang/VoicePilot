@@ -340,9 +340,17 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     if (historySavedRef.current) return;
     if (fullText.trim().length === 0) return;
     historySavedRef.current = true;
-    historySaveRef.current = vp.historySave({ text: fullText }).then((r) => {
-      historyIdRef.current = r?.id ?? null;
-    });
+    historySaveRef.current = vp
+      .historySave({ text: fullText })
+      .then((r) => {
+        historyIdRef.current = r?.id ?? null;
+      })
+      .catch((e) => {
+        // 这条 promise 会被 resolveHistoryId await：若它 reject，异常会穿出
+        // persistEdited 并打断 copy / adopt / close 的收尾。所以在这里就地吞掉，
+        // id 留空后 resolveHistoryId 返回 null，persistEdited 自行 no-op。
+        console.error(`[历史] 保存失败，已跳过本次回写：${e?.message ?? e}`);
+      });
   }, [snap.state, fullText, vp]);
 
   /**
