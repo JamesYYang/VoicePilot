@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { CaptureEngine } from './audio/capture';
 import { useT } from './i18n';
+import { ParagraphSegmenter } from './segment/segmenter';
 
 /**
  * 悬浮条（PRD §4.1 / §5.6）。
@@ -17,34 +18,9 @@ import { useT } from './i18n';
  *
  * 文本模型沿用浏览器原型里已验证过的那套：committed[] 存定稿句、draft 存
  * 当前草稿，渲染时把 draft 追加在最后一段末尾。定稿与草稿的区分来自服务端
- * 的 sentence_end，分段判据是句间静默 ≥800ms（demo 里实测出来的阈值）。
+ * 的 sentence_end，分段判据见 ./segment/segmenter。
  */
 
-/**
- * 句间静默超过多少才另起一段——**自适应**，不再用固定阈值。
- *
- * 固定 800ms 的问题：新闻播报、领导发言这类语速慢的口述，句与句之间的停顿
- * 本来就很长（1~2s），固定阈值会把整段文字切成碎片。
- *
- * 改为「按说话人自己的节奏」判：维护最近若干句的句间静默，取中位数，
- * 静默超过「中位数 × PARA_BREAK_MULT」才另起一段，且不低于 PARA_BREAK_MIN_MS。
- * 语速快的人中位数小 → 阈值低、正常分段；语速慢的人中位数大 → 阈值高、
- * 只有真正的长停顿（换话题）才分段，句间停顿不再误切。
- */
-const PARA_BREAK_MIN_MS = 1200;
-const PARA_BREAK_MULT = 2.5;
-const GAP_WINDOW = 10;
-
-function median(xs: number[]): number {
-  if (xs.length === 0) return 0;
-  const s = [...xs].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
-
-function breakThresholdMs(gaps: number[]): number {
-  return Math.max(median(gaps) * PARA_BREAK_MULT, PARA_BREAK_MIN_MS);
-}
 /** 未确认帧数的上限。超了就丢新帧，防止 IPC 队列无界增长（A8） */
 const MAX_INFLIGHT = 8;
 /**
@@ -80,6 +56,8 @@ interface Partial {
   sentenceEnd: boolean;
   beginTime: number | null;
   endTime: number | null;
+  /** 事件到达渲染进程的本地时间（主进程在 WS 收到时打点） */
+  recvAtMs: number;
 }
 
 interface Committed {
@@ -134,11 +112,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   const cumSamplesRef = useRef(0);
   const ackedSeqRef = useRef(0);
   const droppedRef = useRef(0);
-  const lastEndRef = useRef(0);
-  /** 最近若干句的句间静默（毫秒），用于自适应分段判据 */
-  const gapsRef = useRef<number[]>([]);
   const historySavedRef = useRef(false);
   const historyIdRef = useRef<number | null>(null);
+  const segmenterRef = useRef(new ParagraphSegmenter());
 
   const captureRef = useRef<{ start: () => Promise<void>; stop: () => Promise<void> } | null>(null);
   const errorTimerRef = useRef<number | null>(null);
@@ -203,21 +179,23 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     });
     const offPartial = vp.onPartial((p: Partial) => {
       if (p.sentenceEnd) {
-        // 定稿：整句入列，并据「自适应句间静默阈值」决定是否另起一段
-        const gap = p.beginTime !== null && lastEndRef.current ? p.beginTime - lastEndRef.current : 0;
-        if (gap > 0) {
-          gapsRef.current.push(gap);
-          if (gapsRef.current.length > GAP_WINDOW) gapsRef.current.shift();
-        }
-        setCommitted((prev) => [
-          ...prev,
-          { text: p.text, paraBreak: gap >= breakThresholdMs(gapsRef.current) },
-        ]);
+        const r = segmenterRef.current.offer({
+          sentenceEnd: true,
+          beginTime: p.beginTime,
+          endTime: p.endTime,
+          recvAtMs: p.recvAtMs,
+        });
+        setCommitted((prev) => [...prev, { text: p.text, paraBreak: r?.paraBreak === true }]);
         setDraft('');
       } else {
+        segmenterRef.current.offer({
+          sentenceEnd: false,
+          beginTime: p.beginTime,
+          endTime: p.endTime,
+          recvAtMs: p.recvAtMs,
+        });
         setDraft(p.text);
       }
-      if (p.endTime !== null) lastEndRef.current = p.endTime;
     });
 
     // 挂载时拉一次当前状态：可能错过了渲染进程启动前的那几次广播
@@ -273,8 +251,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       cumSamplesRef.current = 0;
       ackedSeqRef.current = 0;
       droppedRef.current = 0;
-      lastEndRef.current = 0;
-      gapsRef.current = [];
+      segmenterRef.current.reset();
       historySavedRef.current = false;
       historyIdRef.current = null;
 
