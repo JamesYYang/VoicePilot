@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import App from '../App';
 import Studio from '../studio/Studio';
+import SettingsView from '../studio/SettingsView';
 import { I18nProvider } from '../i18n';
 import { ParagraphSegmenter, breakThresholdMs, median } from '../segment/segmenter';
 
@@ -577,6 +578,71 @@ export async function runUiTest() {
     const after = seg.offer(f(6600, 7600, 9)); // gap 2000 → 阈值 1200，应分段
     check('reset 真的清空了 gap 窗口', after?.paraBreak === true, JSON.stringify(after));
   }
+
+  // ---- 21. 设置页快捷键 ----
+  const settingsContainer = document.createElement('div');
+  document.body.appendChild(settingsContainer);
+
+  const shortcutSet: { payloads: string[] } = { payloads: [] };
+  const settingsBridge = {
+    ...real,
+    // contextBridge 属性不可枚举，展开复制不到，用到的必须显式声明
+    getLanguage: () => Promise.resolve({ locale: 'zh-CN' as const }),
+    onLanguageChanged: () => () => {},
+    setLanguage: () => Promise.resolve({ ok: true, locale: 'zh-CN' as const }),
+    getPermissionStatus: () => Promise.resolve({ accessibility: null }),
+    openAccessibilitySettings: () => Promise.resolve(false),
+    getShortcut: () => Promise.resolve({ accel: 'Ctrl+Shift+Space', isDefault: true }),
+    setShortcut: (a: string) => {
+      shortcutSet.payloads.push(a);
+      return Promise.resolve({ ok: true, accel: a });
+    },
+  };
+
+  createRoot(settingsContainer).render(<SettingsView bridge={settingsBridge} />);
+  const accelEl = () => settingsContainer.querySelector('[data-testid="settings-shortcut"]')?.textContent;
+  const shownInitial = await waitFor(() => accelEl() === 'Ctrl+Shift+Space');
+  check('设置页渲染当前快捷键', shownInitial, JSON.stringify(accelEl()));
+
+  const recBtn = settingsContainer.querySelector<HTMLButtonElement>('[data-testid="settings-shortcut-record"]');
+  check('录制按钮存在', recBtn != null);
+
+  recBtn?.click();
+  await flush();
+  // 录制态：派发一个带修饰键的 keydown（捕获阶段监听，派发到 window 即可命中）
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, altKey: true }));
+  await flush();
+  check('录制后调用 setShortcut 且载荷正确', shortcutSet.payloads[0] === 'Ctrl+Alt+Y',
+    JSON.stringify(shortcutSet.payloads));
+  const shownUpdated = await waitFor(() => accelEl() === 'Ctrl+Alt+Y');
+  check('成功后界面显示新快捷键', shownUpdated, JSON.stringify(accelEl()));
+
+  // ---- 21.5 纯修饰键忽略 + 冲突路径（Task 7 硬性约束，brief 断言未覆盖，此处补齐）----
+  shortcutSet.payloads.length = 0;
+  // 直接改写 bridge 上的方法：组件在事件触发时读 vp.setShortcut，
+  // 所以换个实现即可模拟主进程注册失败，不需要重挂组件。
+  settingsBridge.setShortcut = (a: string) => {
+    shortcutSet.payloads.push(a);
+    return Promise.resolve({ ok: false, accel: 'Ctrl+Alt+Y' });
+  };
+
+  settingsContainer.querySelector<HTMLButtonElement>('[data-testid="settings-shortcut-record"]')?.click();
+  await flush();
+  // 纯修饰键必须被忽略：既不提交，也不能退出录制态
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true }));
+  await flush();
+  check('纯修饰键被忽略（不提交且仍在录制）',
+    shortcutSet.payloads.length === 0 && accelEl() === '请按下新的组合键…',
+    JSON.stringify({ payloads: shortcutSet.payloads, accel: accelEl() }));
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, altKey: true }));
+  await flush();
+  check('冲突候选已提交给 setShortcut', shortcutSet.payloads[0] === 'Ctrl+Alt+K',
+    JSON.stringify(shortcutSet.payloads));
+  const conflictShown = await waitFor(() =>
+    settingsContainer.textContent?.includes('该快捷键已被占用，请换一个') === true);
+  check('冲突时显示占用提示', conflictShown, JSON.stringify(settingsContainer.textContent));
+  check('冲突时不更新当前显示的快捷键', accelEl() === 'Ctrl+Alt+Y', JSON.stringify(accelEl()));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

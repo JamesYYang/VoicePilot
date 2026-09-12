@@ -53,6 +53,9 @@ export default function SettingsView({ bridge }: { bridge?: Window['voicepilot']
         <option value="en-US">English</option>
       </select>
 
+      <h2 style={{ ...styles.h2, marginTop: 16 }}>{t('settings.shortcut')}</h2>
+      <ShortcutSetting vp={vp} />
+
       <h2 style={{ ...styles.h2, marginTop: 16 }}>{t('settings.permissions')}</h2>
 
       {!loaded ? null : !applicable ? (
@@ -77,6 +80,65 @@ export default function SettingsView({ bridge }: { bridge?: Window['voicepilot']
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 快捷键录制。点击后进入录制态，捕获下一个带修饰键的组合键。
+ * 冲突（主进程注册失败）时显示提示且**不更新**界面上的当前键。
+ */
+function ShortcutSetting({ vp }: { vp: Window['voicepilot'] }) {
+  const t = useT();
+  const [accel, setAccel] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    void vp.getShortcut().then((r) => { if (alive) setAccel(r.accel); }).catch(() => {});
+    return () => { alive = false; };
+  }, [vp]);
+
+  // 录制：只在 recording 时监听 keydown；忽略纯修饰键本身
+  useEffect(() => {
+    if (!recording) return;
+    const onKey = async (e: KeyboardEvent) => {
+      e.preventDefault();
+      const mods: string[] = [];
+      if (e.ctrlKey) mods.push('Ctrl');
+      if (e.altKey) mods.push('Alt');
+      if (e.shiftKey) mods.push('Shift');
+      if (e.metaKey) mods.push('Super');
+      const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+      const isModifierOnly = ['Control', 'Alt', 'Shift', 'Meta'].includes(e.key);
+      if (isModifierOnly || mods.length === 0) return;
+      const next = [...mods, key].join('+');
+      setRecording(false);
+      const r = await vp.setShortcut(next).catch(() => ({ ok: false, accel }));
+      if (r.ok) { setAccel(r.accel); setError(''); }
+      else { setError(t('settings.shortcut.conflict')); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [recording, vp, t, accel]);
+
+  return (
+    <div style={styles.block}>
+      <div style={styles.statusRow}>
+        <span data-testid="settings-shortcut" style={styles.label}>
+          {recording ? t('settings.shortcut.recording') : accel}
+        </span>
+        <button
+          data-testid="settings-shortcut-record"
+          style={styles.button}
+          onClick={() => { setError(''); setRecording(true); }}
+        >
+          {t('settings.shortcut.record')}
+        </button>
+      </div>
+      {error && <span style={{ color: '#dc2626' }}>{error}</span>}
+      <span style={styles.plain}>{t('settings.shortcut.hint')}</span>
     </div>
   );
 }
