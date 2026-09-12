@@ -144,7 +144,7 @@ export async function runUiTest() {
       polishCall.payload = payload;
       return Promise.resolve(true);
     },
-    adoptPolish: (payload: { polished: string; scene: string; tone: string }) => {
+    adoptPolish: (payload: { id?: number; polished: string; scene: string; tone: string }) => {
       adoptCall.payload = payload;
       return Promise.resolve(true);
     },
@@ -413,7 +413,7 @@ export async function runUiTest() {
   // 用对象属性兜住调用载荷：TS 会把 `let x = null` 收窄成 null（闭包里的
   // 赋值不在它的流分析里），属性访问则不会被这样收窄。
   const polishCall: { payload: { text: string; scene: Preset; tone: Preset; target?: 'bar' | 'studio' } | null } = { payload: null };
-  const adoptCall: { payload: { polished: string; scene: string; tone: string } | null } = { payload: null };
+  const adoptCall: { payload: { id?: number; polished: string; scene: string; tone: string } | null } = { payload: null };
   // 给 Studio 注入假 bridge（与 App 同款模式），不动只读的 window.voicepilot。
   // onStudioRefresh 必须多播：Studio 与 PolishView 都会订阅（真实 preload 的
   // ipcRenderer.on 是多播），单播 mock 会互相覆盖。
@@ -436,7 +436,7 @@ export async function runUiTest() {
       polishCall.payload = p;
       return Promise.resolve(true);
     },
-    adoptPolish: (p: { polished: string; scene: string; tone: string }) => {
+    adoptPolish: (p: { id?: number; polished: string; scene: string; tone: string }) => {
       adoptCall.payload = p;
       return Promise.resolve(true);
     },
@@ -815,24 +815,31 @@ export async function runUiTest() {
   clickButton('采纳');
   await flush();
   // 同上：显式断言绕开流收窄，否则 adoptCall.payload 被判成 never
-  const barAdopted = adoptCall.payload as { polished: string; scene: string; tone: string } | null;
+  const barAdopted = adoptCall.payload as
+    { id?: number; polished: string; scene: string; tone: string } | null;
   check('采纳取润色结果（不是编辑区原文）', copyCtl.text === '润色后的第一句', JSON.stringify(copyCtl.text));
   check('采纳把润色结果回写历史',
     barAdopted?.polished === '润色后的第一句', JSON.stringify(barAdopted));
 
-  // Finding 1：采纳成功只能有一条提示。断言**提示区节点**的精确文本，不是整容器
-  // 子串 —— bar.adopt.fallback（'已复制到剪贴板，请手动粘贴（自动写回尚未实现）'）
-  // 本身就包含 bar.copied 的子串 '已复制到剪贴板'，整容器 includes 两种状态都为真，
-  // 无法区分。这里键在节点数 + 每个节点的精确 textContent：若 adopt 又
-  // setCopied(true)，提示区会多出文本恰为 '已复制到剪贴板' 的节点，
-  // length===1 与「无节点精确等于 bar.copied」两条同时破，断言必红。
+  // Finding 1 回归护栏：回写必须携带**本会话**的历史 id（假 historySave 返回 1）。
+  // 丢掉 id 时这里是 undefined —— 主进程要么写不进去（NULL）、要么写到上一次
+  // 「打开应用」留下的陈旧行上。断言按精确值 1，id 管线一断必红。
+  check('采纳回写携带会话历史 id',
+    barAdopted?.id === 1, JSON.stringify(barAdopted));
+
+  // Finding 1：采纳成功只能有一条提示。两个提示节点现在有各自的 testid
+  // （bar-hint-copied / bar-hint-adopt），按前缀一次性取全，断言**节点数 +
+  // 每个节点的 id 与精确文本**：若 adopt 又 setCopied(true)，会多出一个
+  // id=bar-hint-copied、文本为 '已复制到剪贴板' 的节点，length===1 与
+  // 「无节点文本等于 bar.copied」两条同时破，断言必红（即双重提示回归）。
   const adoptHintNodes = Array.from(
-    container.querySelectorAll('[data-testid="bar-hint"]')
-  ).map((n) => n.textContent);
+    container.querySelectorAll('[data-testid^="bar-hint"]')
+  ).map((n) => ({ id: n.getAttribute('data-testid'), text: n.textContent }));
   check('采纳成功后提示区只有兜底一条、不含 bar.copied',
     adoptHintNodes.length === 1 &&
-      adoptHintNodes[0] === '已复制到剪贴板，请手动粘贴（自动写回尚未实现）' &&
-      adoptHintNodes.every((s) => s !== '已复制到剪贴板'),
+      adoptHintNodes[0].id === 'bar-hint-adopt' &&
+      adoptHintNodes[0].text === '已复制到剪贴板，请手动粘贴（自动写回尚未实现）' &&
+      adoptHintNodes.every((n) => n.text !== '已复制到剪贴板'),
     JSON.stringify(adoptHintNodes));
 
   const failed = results.filter((r) => !r.ok);

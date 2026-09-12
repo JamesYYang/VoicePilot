@@ -1,4 +1,4 @@
-import { SessionMachine } from '../session/machine.js';
+import { SessionMachine, isBarFocusable } from '../session/machine.js';
 import { AudioQueue } from '../session/audio-queue.js';
 
 /**
@@ -248,6 +248,16 @@ async function testBackpressure() {
 
 // ---------------------------------------------------------------- 入口
 
+/** A2 回归护栏：悬浮条焦点只允许 reviewing 一个状态。 */
+async function testBarFocusable() {
+  console.log('\n[7] A2：悬浮条仅 reviewing 可聚焦');
+  check('reviewing 可聚焦（编辑区需要键盘输入）', isBarFocusable('reviewing') === true);
+  check('idle 不可聚焦', isBarFocusable('idle') === false);
+  check('warming 不可聚焦（A2 硬约束）', isBarFocusable('warming') === false);
+  check('listening 不可聚焦（A2 硬约束）', isBarFocusable('listening') === false);
+  check('draining 不可聚焦（A2 硬约束）', isBarFocusable('draining') === false);
+}
+
 export async function runMachineSelftest() {
   console.log('=== 状态机与背压自测 ===');
 
@@ -257,6 +267,7 @@ export async function runMachineSelftest() {
   await testThrottlingRetry();
   await testNonRetryableError();
   await testBackpressure();
+  await testBarFocusable();
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

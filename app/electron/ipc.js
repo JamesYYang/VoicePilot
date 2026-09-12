@@ -1,7 +1,7 @@
 import { app, clipboard, BrowserWindow, ipcMain, shell, systemPreferences } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { SessionMachine } from './session/machine.js';
+import { SessionMachine, isBarFocusable } from './session/machine.js';
 import { getCurrentLocale, setCurrentLocale } from './locale.js';
 import { t } from '../shared/i18n/index.js';
 import { createStudioWindow, getStudioWindow } from './studio.js';
@@ -36,9 +36,11 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     if (!bar || bar.isDestroyed()) return;
     // 只有 reviewing 需要键盘输入（编辑区）。聆听三态必须保持不可聚焦，
     // 否则「不抢焦点」（A2）就破了 —— 那是这个程序最硬的约束。
+    // 映射抽到 isBarFocusable（session/machine.js）纯粹是为了让它有回归断言：
+    // 这行被删掉时，界面自测看不见，只有那边的纯函数断言能拦下来。
     // 注意这里**不调用 focus()**：切成可聚焦只是允许用户点击进来。
     if (channel === 'vp:state') {
-      bar.setFocusable(payload?.state === 'reviewing');
+      bar.setFocusable(isBarFocusable(payload?.state));
     }
     bar.webContents.send(channel, payload);
   };
@@ -255,8 +257,18 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
 
     // 事件发给发起方所在窗口。悬浮条内润色（target='bar'）必须回到悬浮条，
     // 否则流式结果发到主应用窗口，悬浮条下半栏永远空白。
+    //
+    // win 为空（悬浮条还没建 / 已关）时必须返回 false：以前 win?.webContents.send
+    // 会静默吞掉所有 delta/done/error，而 handler 照样返回 true —— 渲染进程的
+    // polishing 就永远停在 true，按钮卡死禁用。返回 false 让渲染进程能收尾。
     const win = target === 'bar' ? getBar() : getStudioWindow();
-    const emit = (channel, payload) => win?.webContents.send(channel, payload);
+    if (!win || win.isDestroyed()) return false;
+    const emit = (channel, payload) => {
+      // 窗口在流式过程中被销毁也要挡住：webContents.send 对 destroyed 窗口会抛，
+      // 而逐个事件 try/catch 只会把真正的错误埋掉。
+      if (win.isDestroyed()) return;
+      win.webContents.send(channel, payload);
+    };
 
     try {
       await streamPolish({
@@ -289,18 +301,28 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
   /** 删除一条历史。返回是否真的删掉了。 */
   ipcMain.handle('vp:history/delete', (_e, id) => deleteHistory(Number(id)));
 
-  /** 编辑后更新同一条历史的正文。悬浮条在采纳/复制/关闭时调用。 */
+  /** 编辑后更新同一条历史的正文。悬浮条在采纳/复制/关闭/打开应用时调用。 */
   ipcMain.handle('vp:history/update-text', (_e, { id, text }) => {
     const n = Number(id);
     if (!Number.isFinite(n)) return false;
-    updateHistoryText(n, String(text ?? ''));
-    return true;
+    // 透传 store 的 r.changes>0：id 不存在时诚实返回 false，
+    // 而不是无论改没改到都回 true。
+    return updateHistoryText(n, String(text ?? ''));
   });
 
-  /** 采用润色结果：把润色文本 + 场景/语气回写进本次会话的历史条目。 */
-  ipcMain.handle('vp:polish/adopt', (_e, { polished, scene, tone }) => {
-    if (pendingHistoryId != null) {
-      updateHistoryPolish(pendingHistoryId, { polished, scene, tone });
+  /**
+   * 采用润色结果：把润色文本 + 场景/语气回写进本次会话的历史条目。
+   *
+   * id 优先：悬浮条（bar）自己发起的会话与主应用窗口无关，必须显式带上本条
+   * 历史的 id。省略时才回退到 pendingHistoryId —— 那是 Studio 一路的旧行为：
+   * 主应用经 vp:studio/open 打开时设下该值，Studio 采纳时不再单独传 id。
+   * 悬浮条不设 pendingHistoryId，所以以前这里要么写不进去（null），要么写错行
+   * （上一次「打开应用」留下的陈旧 id）。
+   */
+  ipcMain.handle('vp:polish/adopt', (_e, { id, polished, scene, tone }) => {
+    const target = id != null ? Number(id) : pendingHistoryId;
+    if (target != null) {
+      updateHistoryPolish(target, { polished, scene, tone });
     }
     return true;
   });

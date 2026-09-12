@@ -125,6 +125,10 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   const droppedRef = useRef(0);
   const historySavedRef = useRef(false);
   const historyIdRef = useRef<number | null>(null);
+  // historySave 的 Promise。historyIdRef 是异步填进去的，而「采纳/复制/关闭/打开应用」
+  // 可能在这个 Promise 落地前就被点到（几百毫秒内快速点击）。把 Promise 存下来，
+  // 读 id 之前 await 一次即可 —— 没有保存待完成时它是 null，await 立即返回，不阻塞。
+  const historySaveRef = useRef<Promise<void> | null>(null);
 
   const captureRef = useRef<{ start: () => Promise<void>; stop: () => Promise<void> } | null>(null);
   const errorTimerRef = useRef<number | null>(null);
@@ -263,6 +267,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       droppedRef.current = 0;
       historySavedRef.current = false;
       historyIdRef.current = null;
+      historySaveRef.current = null;
 
       // 「快捷键 → 上屏」的终点是**真的画出来**的那一刻，所以等一帧再回报。
       // performance.timeOrigin + performance.now() 是 epoch 毫秒，
@@ -316,6 +321,10 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     const offError = vp.onPolishError(({ message }) => {
       setPolishError(message);
       setPolishing(false);
+      // 半成品必须一起清掉：面板查到错误后只显示错误，用户看不到那段残缺文本，
+      // 但 effectiveText（采纳/复制取它）仍会落到 polishOut 上，静默把截断结果
+      // 当成成品用并回写。宁可让用户重新润色，也不能悄悄用半截文本。
+      setPolishOut('');
     });
     return () => {
       offDelta();
@@ -331,15 +340,25 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     if (historySavedRef.current) return;
     if (fullText.trim().length === 0) return;
     historySavedRef.current = true;
-    void vp.historySave({ text: fullText }).then((r) => {
+    historySaveRef.current = vp.historySave({ text: fullText }).then((r) => {
       historyIdRef.current = r?.id ?? null;
     });
   }, [snap.state, fullText, vp]);
 
+  /**
+   * 等本会话的历史保存落地并返回 id。
+   * historySaveRef 为空（还没发起保存 / 本会话没有文本）时立即返回 null，
+   * 所以常规路径不会被拖慢；只有「保存刚发出就被点到」的窄窗口才会等这一趟 IPC。
+   */
+  const resolveHistoryId = useCallback(async () => {
+    await historySaveRef.current;
+    return historyIdRef.current;
+  }, []);
+
   // 编辑后的文本回写同一条历史（采纳 / 复制 / 关闭 / 打开应用 时各调一次）。
   // 落库失败不阻塞主流程：界面闭环优先，下次听写会另起一条。
   const persistEdited = useCallback(async () => {
-    const id = historyIdRef.current;
+    const id = await resolveHistoryId();
     if (id == null) return;
     if (edited.trim().length === 0) return;
     try {
@@ -347,7 +366,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     } catch {
       /* 落库失败不阻塞主流程 */
     }
-  }, [edited, vp]);
+  }, [edited, vp, resolveHistoryId]);
 
   // 移入时关闭穿透（按钮可点），移出时恢复穿透（不挡住下面的应用）
   useEffect(() => {
@@ -421,8 +440,12 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
   /** 「打开应用」：带着编辑后的文本去主应用（悬浮条随即关闭）。 */
   const openApp = useCallback(() => {
-    void persistEdited();
-    void vp.openStudio({ text: edited, historyId: historyIdRef.current ?? undefined });
+    void (async () => {
+      // 先 await 一次，保证 historyId 已就绪再把它交给主应用；
+      // 否则快速点击时带过去的是 undefined（见 resolveHistoryId）。
+      await persistEdited();
+      void vp.openStudio({ text: edited, historyId: historyIdRef.current ?? undefined });
+    })();
     void vp.toggle();
   }, [edited, persistEdited, vp]);
 
@@ -439,7 +462,15 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     // 回写失败不阻塞采纳：界面闭环优先。
     if (polishOut.length > 0) {
       try {
-        await vp.adoptPolish({ polished: polishOut, scene: scene?.name ?? '', tone: tone?.name ?? '' });
+        await vp.adoptPolish({
+          // 必须显式带上本条会话的历史 id。悬浮条不设主进程的 pendingHistoryId，
+          // 不带 id 时这次回写要么落空（NULL）、要么写到上一次「打开应用」留下的
+          // 陈旧行上 —— 静默改错历史。
+          id: historyIdRef.current ?? undefined,
+          polished: polishOut,
+          scene: scene?.name ?? '',
+          tone: tone?.name ?? '',
+        });
       } catch {
         /* 回写失败不阻塞采纳 */
       }
@@ -468,13 +499,19 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     setPolishing(true);
     void vp
       .startPolish({ text: edited, scene, tone, target: 'bar' })
+      .then((ok) => {
+        // 主进程在目标窗口不存在/已销毁时返回 false（事件无处可发，等于这次润色
+        // 根本没跑）。以前这条路径静默丢弃一切事件而 polishing 停在 true，按钮
+        // 从此卡死禁用。这里转成一次失败，走与 catch 相同的收尾。
+        if (!ok) throw new Error(t('bar.err.polishStart'));
+      })
       .catch((e) => {
         // 下发失败（IPC 拒绝/主进程未就绪）必须收尾，否则 polishing 永远为真，
         // 「润色」按钮就此卡死禁用，还会冒成 unhandled rejection。
         setPolishing(false);
         setPolishError(e instanceof Error ? e.message : String(e));
       });
-  }, [edited, scene, tone, vp]);
+  }, [edited, scene, tone, vp, t]);
 
   // idle 时什么都不渲染。窗口是透明的，不渲染就等于隐藏。
   // 但出错时即便已回到 idle 也要多停留几秒（errorHold），
@@ -509,7 +546,12 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
           data-testid="bar-editor"
           style={styles.editor}
           value={edited}
-          onChange={(e) => setEdited(e.target.value)}
+          onChange={(e) => {
+            setEdited(e.target.value);
+            // 用户一改文本，上一次润色失败的错误面板就过期了，不该继续挂着
+            // （死掉的面板会占着布局、还让人以为这次也失败了）。
+            setPolishError(null);
+          }}
           placeholder={t('bar.editPlaceholder')}
         />
       ) : (
@@ -549,7 +591,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
               style={styles.button}
               data-testid="bar-copy"
               onClick={copy}
-              disabled={edited.length === 0}
+              // 按 effectiveText 判断，不能按 edited：只有润色结果、编辑区被清空时
+              // edited.length===0 会把一个本来可复制的非空文本锁死禁用。
+              disabled={effectiveText.length === 0}
             >
               {t('bar.copy')}
             </button>
@@ -610,12 +654,12 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       )}
 
       {copied && (
-        <div data-testid="bar-hint" style={styles.hint}>
+        <div data-testid="bar-hint-copied" style={styles.hint}>
           {t('bar.copied')}
         </div>
       )}
       {hint && (
-        <div data-testid="bar-hint" style={styles.hint}>
+        <div data-testid="bar-hint-adopt" style={styles.hint}>
           {hint}
         </div>
       )}

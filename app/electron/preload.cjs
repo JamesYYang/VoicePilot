@@ -215,7 +215,11 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:history/update-text', payload);
   },
 
-  /** 采用润色结果，回写历史。 */
+  /**
+   * 采用润色结果，回写历史。
+   * payload: { id?: number, polished, scene, tone } —— 悬浮条必须带 id
+   * （本条会话的历史行）；Studio 一路可省略，由主进程回退到 pendingHistoryId。
+   */
   adoptPolish(payload) {
     return ipcRenderer.invoke('vp:polish/adopt', payload);
   },

@@ -93,8 +93,8 @@ interface VoicePilotBridge {
   historyDelete(id: number): Promise<boolean>;
   /** 编辑后更新同一条历史的正文 */
   historyUpdateText(payload: { id: number; text: string }): Promise<boolean>;
-  /** 采用润色结果，回写历史 */
-  adoptPolish(payload: { polished: string; scene: string; tone: string }): Promise<boolean>;
+  /** 采用润色结果，回写历史。id 指定目标历史行；省略时主进程回退到 Studio 的 pendingHistoryId */
+  adoptPolish(payload: { id?: number; polished: string; scene: string; tone: string }): Promise<boolean>;
   /** 主应用挂载时拉 {text, scenes, tones, defaultSceneId} */
   syncStudio(): Promise<{ text: string; scenes: Preset[]; tones: Preset[]; defaultSceneId: number | null }>;
   /** 悬浮条润色所需的预设（不含文本） */

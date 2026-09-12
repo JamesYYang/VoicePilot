@@ -21,6 +21,7 @@ export const zhTW = {
   'bar.err.throttling': '服務繁忙，正在重試',
   'bar.err.key': '未取得授權，請聯絡管理員',
   'bar.err.asr': '辨識服務出錯，已保留已辨識內容',
+  'bar.err.polishStart': '潤色請求未發出，請重試',
   'studio.polish': '潤色',
   'studio.history': '歷史',
   'studio.settings': '設定',

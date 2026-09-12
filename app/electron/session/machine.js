@@ -32,6 +32,20 @@ const DRAIN_INTERVAL_MS = 50;
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000];
 const MAX_ATTEMPTS = 3;
 
+/**
+ * 悬浮条窗口是否可聚焦（A2 硬约束）。
+ *
+ * 只有 `reviewing`（结果可编辑）允许聚焦；`warming` / `listening` / `draining`
+ * **必须保持不可聚焦** —— 一聚焦就会把用户正在操作的应用的焦点抢走，「不抢焦点」
+ * 这条最硬的约束当场就破。`idle` 悬浮条根本不显示，同样不可聚焦。
+ *
+ * 抽成纯函数是为了让它有回归断言（见 selftest/machine.js）：ipc.js 里对
+ * setFocusable 的调用肉眼看不见，删掉也没任何测试会红。
+ */
+export function isBarFocusable(state) {
+  return state === 'reviewing';
+}
+
 export class SessionMachine {
   #emit;
   #queue = new AudioQueue();

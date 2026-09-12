@@ -21,6 +21,7 @@ export const enUS = {
   'bar.err.throttling': 'Server busy, retrying',
   'bar.err.key': 'Not authorized — contact your admin',
   'bar.err.asr': 'Recognition error, recognized text kept',
+  'bar.err.polishStart': 'Polish request could not be sent, please retry',
   'studio.polish': 'Polish',
   'studio.history': 'History',
   'studio.settings': 'Settings',

@@ -111,11 +111,15 @@ export async function runStoreSelftest() {
   setShortcut('CommandOrControl+Shift+K');
   const okShortcutOverwrite = getShortcut() === 'CommandOrControl+Shift+K';
 
-  // 编辑后更新同一条历史的正文（不改 id / duration_ms / created_at）
+  // 编辑后更新同一条历史的正文（不改 id / duration_ms / created_at）。
+  // 返回值必须诚实：命中 true、id 不存在 false（旧实现无条件返回 undefined，
+  // IPC 层再硬编码 true，写没写到都报成功）。
   const { id: editId } = saveHistory({ text: '原始正文', durationMs: 1000 });
-  updateHistoryText(editId, '改过的正文');
+  const okUpdateTextHit = updateHistoryText(editId, '改过的正文') === true;
+  const okUpdateTextMiss = updateHistoryText(999999, '不存在') === false;
   const edited = getHistory(editId);
   const okUpdateText =
+    okUpdateTextHit && okUpdateTextMiss &&
     edited?.text === '改过的正文' &&
     edited?.id === editId &&
     edited?.duration_ms === 1000;

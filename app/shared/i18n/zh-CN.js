@@ -22,6 +22,7 @@ export const zhCN = {
   'bar.err.throttling': '服务繁忙，正在重试',
   'bar.err.key': '未获取到授权，请联系管理员',
   'bar.err.asr': '识别服务出错，已保留已识别内容',
+  'bar.err.polishStart': '润色请求未发出，请重试',
   // 主应用导航
   'studio.polish': '润色',
   'studio.history': '历史',
