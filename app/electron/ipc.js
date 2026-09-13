@@ -33,6 +33,18 @@ let pendingHistoryId = null;
  */
 const DEBUG_INJECT = process.env.VP_INJECT_DEBUG === '1';
 
+/**
+ * 成功写回后、拆悬浮条之前要等多久（毫秒）。
+ *
+ * 默认 250：真机实测在 Word 上 200ms 已足够（不等 = 0/4 成功，等 200 = 4/4 成功），
+ * 留一点余量。`VP_ADOPT_SETTLE_MS=<n>` 可覆盖，便于真机再调 ——
+ * 与仓库里既有的 `VP_*_DEBUG` 一类调试旋钮同一做法。
+ */
+function settleMs() {
+  const n = Number(process.env.VP_ADOPT_SETTLE_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 250;
+}
+
 export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, resetBarHeight, rebuildTray }) {
   /**
    * 主进程 → 渲染进程。
@@ -167,10 +179,22 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
 
     const before = await probeBar('发键前');
     const r = await pasteTo(machine.getTarget());
+
+    // ⚠️ 成功后**不能立刻返回**。
+    //
+    // 渲染层拿到这个 promise 的结果才会去关悬浮条，而关闭路径会动我们自己的窗口状态
+    // （`setFocusable(false)` 触发 SWP_FRAMECHANGED + 尺寸复位）。这些在**我们的窗口**上
+    // 动手脚的操作会把激活从目标应用手里扰动走 —— 目标那边还没处理完的粘贴随之作废。
+    //
+    // 真机实测（Word，同一套代码，只差这个等待）：不等 = 0/4 成功；等 200ms = 4/4 成功。
+    // 记事本粘贴极快所以一直能用，Word 的富文本剪贴板慢就赶不上 —— 「时灵时不灵」就是谁先到。
+    //
+    // 语义上这不是「多睡一会儿」，而是：**成功 = 粘贴真的有机会落地**，
+    // 而不只是「按键发出去了」。只覆盖纯函数的判定无法表达这件事，所以放在这里。
+    if (r.ok) await new Promise((res) => setTimeout(res, settleMs()));
+
     if (DEBUG_INJECT) {
-      // 等可能的粘贴落地后再读第二次。渲染层要等这个 promise 才关悬浮条，
-      // 所以此刻编辑区仍在。
-      await new Promise((res) => setTimeout(res, 200));
+      // 等可能的粘贴落地后再读第二次。此刻编辑区仍在（返回被上面延后了）。
       const after = await probeBar('发键后');
       if (before && after && before.editor !== after.editor) {
         console.warn('[注入] ⚠️ 悬浮条编辑区内容在发键后变了 —— 按键落在了我们自己窗口里');
