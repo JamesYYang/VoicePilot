@@ -476,7 +476,9 @@ app.whenReady().then(async () => {
                 ? './selftest/config-endpoint.js'
                 : process.env.VP_SHORTCUT_SELFTEST
                   ? './selftest/shortcut.js'
-                  : null;
+                  : process.env.VP_INJECT_SELFTEST
+                    ? './selftest/inject.js'
+                    : null;
 
   // 界面自测需要一个隐藏窗口来渲染，结果由 vp:uitest-result 回报（见 ipc.js）
   if (process.env.VP_UI_SELFTEST) {
@@ -489,7 +491,7 @@ app.whenReady().then(async () => {
     // 进程会一直挂着——既不退出也不给非零码，违背「无人值守 + 退出码」的自测契约。
     try {
       const mod = await import(selftest);
-      const run = mod.runAsrSelftest ?? mod.runMachineSelftest ?? mod.runPolishSelftest ?? mod.runStoreSelftest ?? mod.runI18nSelftest ?? mod.runConfigSelftest ?? mod.runShortcutSelftest;
+      const run = mod.runAsrSelftest ?? mod.runMachineSelftest ?? mod.runPolishSelftest ?? mod.runStoreSelftest ?? mod.runI18nSelftest ?? mod.runConfigSelftest ?? mod.runShortcutSelftest ?? mod.runInjectSelftest;
       const r = await run();
       requestQuit(r.ok ? 0 : 1);
     } catch (e) {

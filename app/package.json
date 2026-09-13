@@ -16,6 +16,7 @@
     "dist:mac": "node scripts/prepack-check.mjs && vite build && electron-builder --mac"
   },
   "dependencies": {
+    "koffi": "^3.2.1",
     "opencc-js": "^1.4.2",
     "ws": "^8.21.3"
   },
@@ -43,6 +44,9 @@
       "build/**/*",
       "shared/**/*",
       "!**/*.map"
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
     ],
     "win": {
       "target": ["nsis", "portable"],
