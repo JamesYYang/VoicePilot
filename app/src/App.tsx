@@ -401,6 +401,13 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 可见高度，两者之差就是还缺多少空间。窗口长高后 clientHeight 跟着变大，
   // 差值归零即收敛；文字删短后差值为负，窗口自动缩回下限。
   useEffect(() => {
+    // warming 期间不做测量：上一段会话的定稿文本虽已在 idle→warming 的复位
+    // effect 里被清空，但那只是入队状态更新、这一帧尚未重渲染，textRef 仍指向
+    // 上一段的文本。此时测量会把上一段的高内容算成溢出量，向刚被主进程
+    // resetBarHeight 收回基础高度的窗口再发一次长高请求，复位竞态由此而来。
+    // warming 本就没有内容可量，主进程也已把窗口设成基础高度；直接跳过。
+    // 下次状态变化（listening/draining/reviewing）会重跑本 effect，不会卡在错误高度。
+    if (snap.state === 'warming') return;
     const el = textRef.current;
     if (!el) return;
     const overflow = el.scrollHeight - el.clientHeight;
@@ -539,7 +546,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       onMouseLeave={() => setHovering(false)}
       style={styles.bar}
     >
-      <div style={styles.head}>
+      <div data-testid="bar-head" style={styles.head}>
         <span style={styles.badge}>{LABEL[snap.state]}</span>
         {snap.notice && (
           <span style={styles.notice}>
@@ -622,7 +629,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
       {snap.state === 'reviewing' && (
         <>
-          <div style={styles.actions}>
+          <div data-testid="bar-actions" style={styles.actions}>
             <button
               style={styles.button}
               data-testid="bar-polish"

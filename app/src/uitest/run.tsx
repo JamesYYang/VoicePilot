@@ -755,6 +755,19 @@ export async function runUiTest() {
       title: openAppIcon?.getAttribute('title'),
     }));
 
+  // Finding 4：上面的动作行断言按 testid 把 bar-open-app 过滤掉再比对，图标即便被
+  // 挪回动作行也照样通过（过滤让它消失，比对自然成立）。这里补一条「位置」断言：
+  // 图标不得位于动作行内，且其父节点必须是头部行。挪回动作行 → 两条同时破。
+  const openAppEl = container.querySelector('[data-testid="bar-open-app"]');
+  check('头部图标不在动作行内、父节点是头部（位置回归护栏）',
+    openAppEl?.closest('[data-testid="bar-actions"]') === null &&
+      openAppEl?.parentElement === container.querySelector('[data-testid="bar-head"]'),
+    JSON.stringify({
+      insideActions: openAppEl?.closest('[data-testid="bar-actions"]') != null,
+      parentIsHead:
+        openAppEl?.parentElement === container.querySelector('[data-testid="bar-head"]'),
+    }));
+
   // 折叠区已移除：场景/语气常驻条底，进入 reviewing 立即可见。
   check('场景/语气常驻（reviewing 即可见，且无折叠开关）',
     container.querySelector('[data-testid="bar-scene"]') != null &&
@@ -861,6 +874,75 @@ export async function runUiTest() {
       adoptHintNodes[0].text === '已复制到剪贴板，请手动粘贴（自动写回尚未实现）' &&
       adoptHintNodes.every((n) => n.text !== '已复制到剪贴板'),
     JSON.stringify(adoptHintNodes));
+
+  // ---- 24. 无预设路径：runPolish 早退必须给明确提示、且不渲染结果区 ----
+  // 既有假 bridge 的 polishPresets 恒返回预设，runPolish 里 `!scene || !tone` 的
+  // bar.err.noPresets 分支从未被走到。按本文件既有做法（见 Studio 的 studioBridge）
+  // 另起一棵 App 树 + 独立 bridge：从既有 bridge 派生，只把 polishPresets 覆盖成
+  // 空预设，并给这棵树自己的 state/partial 监听器（否则会与上面那棵树互相覆盖）。
+  const npListeners: {
+    state?: (s: SessionSnapshot) => void;
+    partial?: (p: AsrPartial) => void;
+  } = {};
+  const noPresetBridge = {
+    ...bridge,
+    onState: (cb: NonNullable<(typeof npListeners)['state']>) => {
+      npListeners.state = cb;
+      return () => {};
+    },
+    onPartial: (cb: NonNullable<(typeof npListeners)['partial']>) => {
+      npListeners.partial = cb;
+      return () => {};
+    },
+    polishPresets: () =>
+      Promise.resolve({ scenes: [], tones: [], defaultSceneId: null }),
+  };
+  const npContainer = document.createElement('div');
+  document.body.appendChild(npContainer);
+  createRoot(npContainer).render(
+    <App
+      bridge={noPresetBridge}
+      // 不给真引擎：本段只验 runPolish 的早退，采集一律空跑。
+      createCapture={() => ({ start: async () => {}, stop: async () => {} })}
+    />
+  );
+  await flush();
+  const npFire = <K extends keyof typeof npListeners>(
+    channel: K,
+    payload: Parameters<NonNullable<(typeof npListeners)[K]>>[0]
+  ) => {
+    (npListeners[channel] as ((p: typeof payload) => void) | undefined)?.(payload);
+  };
+
+  // 与 enterReviewing 同款顺序驱动这棵树：idle → warming → listening → 定稿 → reviewing
+  npFire('state', { state: 'idle', notice: null, truncated: false });
+  await flush();
+  npFire('state', { state: 'warming', notice: null, truncated: false });
+  await flush();
+  npFire('state', { state: 'listening', notice: null, truncated: false });
+  npFire('partial', {
+    text: '无预设也要给提示',
+    sentenceEnd: true,
+    recvAtMs: Date.now(),
+    sentenceId: null,
+    beginTime: null,
+    endTime: null,
+    words: [],
+  });
+  npFire('state', { state: 'reviewing', notice: null, truncated: false });
+  await flush();
+  check('无预设：进入 reviewing 后可编辑区可见',
+    npContainer.querySelector('[data-testid="bar-editor"]') != null);
+
+  npContainer.querySelector<HTMLButtonElement>('[data-testid="bar-polish"]')?.click();
+  await flush();
+  // (a) 早退必须看得见：hint 落到条底的提示区（bar-hint-adopt），文案取 zh-CN 词条
+  check('无预设时显示 bar.err.noPresets 提示',
+    npContainer.textContent?.includes('未能加载润色预设，请稍后重试') === true,
+    JSON.stringify(npContainer.textContent));
+  // (b) 早退证据：runPolish 在 setPolishing 之前就返回，润色结果区不该出现
+  check('无预设时 runPolish 早退，不渲染润色结果区',
+    npContainer.querySelector('[data-testid="bar-polish-output"]') == null);
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
