@@ -98,6 +98,14 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     asr: t('bar.err.asr'),
   };
 
+  // 采纳写回失败的文案。用显式映射而不是拼 key（`bar.adopt.fail.${reason}`）：
+  // t() 对缺 key 的处理是**原样返回 key**，拼串会让漏翻译直接显示成一串英文 key，
+  // 而显式映射漏了会落到下面的 ?? 兜底。
+  const ADOPT_FAIL_TEXT: Record<string, string> = {
+    stale: t('bar.adopt.fail.staleTarget'),
+    permission: t('bar.adopt.fail.permission'),
+  };
+
   const [snap, setSnap] = useState<Snapshot>({ state: 'idle', notice: null, truncated: false });
   const [committed, setCommitted] = useState<Committed[]>([]);
   const [draft, setDraft] = useState('');
@@ -491,18 +499,21 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     void vp.toggle();
   }, [persistEdited, vp]);
 
-  // 本 Task 只做「复制 + 明确提示」；真正的写回（取前台窗口 → 还原焦点 → 粘贴）
-  // 是 Plan 2B。用户明确接受这个中间形态：UI 闭环先成立，注入后补。
+  /**
+   * 采纳：把「当前有效文本」写进剪贴板，再让主进程把它粘回**快捷键触发那一刻的
+   * 前台窗口**。
+   *
+   * 剪贴板从不还原（spec 2026-09-13 §0），所以失败时文本仍在剪贴板里 —— 失败的
+   * 后果是「没省一步」而不是「文本丢了」，这也是失败分支敢直接给提示的原因。
+   */
   const adopt = useCallback(async () => {
     await persistEdited();
-    // 有润色结果时把它作为「采用后的正式文本」回写历史（Task 5）。
+    // 有润色结果时把它作为「采用后的正式文本」回写历史。
     // 回写失败不阻塞采纳：界面闭环优先。
     if (polishOut.length > 0) {
       try {
         await vp.adoptPolish({
-          // 必须显式带上本条会话的历史 id。悬浮条不设主进程的 pendingHistoryId，
-          // 不带 id 时这次回写要么落空（NULL）、要么写到上一次「打开应用」留下的
-          // 陈旧行上 —— 静默改错历史。
+          // 必须显式带上本条会话的历史 id，理由见 2A 的 Critical 修复（ee1ab8a）。
           id: historyIdRef.current ?? undefined,
           polished: polishOut,
           scene: scene?.name ?? '',
@@ -512,14 +523,29 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
         /* 回写失败不阻塞采纳 */
       }
     }
+
     const ok = await vp.copy(effectiveText);
-    if (ok) {
-      // 只留 bar.adopt.fallback 一条提示：copied 归「复制」按钮独有，两条同时
-      // 显示会互相打架（ee1ab8a 删过一次，Task 5 的 brief 又带了回来）。
-      setHint(t('bar.adopt.fallback'));
+    if (!ok) {
+      showError({ kind: 'clipboard', message: t('bar.err.clipboard') });
       return;
     }
-    showError({ kind: 'clipboard', message: t('bar.err.clipboard') });
+
+    // 剪贴板已写好，现在置前 + 发粘贴键。主进程返回的 reason 决定提示文案。
+    let r: Awaited<ReturnType<typeof vp.adoptPaste>>;
+    try {
+      r = await vp.adoptPaste();
+    } catch (e) {
+      // IPC 拒绝（主进程未就绪等）。当作一次普通失败，不能让异常冒成
+      // unhandled rejection 把悬浮条卡在无提示的状态。
+      r = { ok: false, reason: 'send-failed' };
+      console.warn(`[采纳] 写回通道失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (r.ok) {
+      // 写回成功：与「复制」同一收尾（reviewing 下 toggle 的语义就是关闭）。
+      void vp.toggle();
+      return;
+    }
+    setHint(ADOPT_FAIL_TEXT[r.reason] ?? t('bar.adopt.fail'));
   }, [effectiveText, polishOut, persistEdited, scene, tone, vp, t]);
 
   // 悬浮条内润色：把编辑区文本连同场景/语气发给主进程，流式结果落到下半区。

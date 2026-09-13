@@ -80,6 +80,19 @@ export async function runUiTest() {
   const barPolishDelta: { cb: ((p: { text: string }) => void) | null } = { cb: null };
   const barPolishDone: { cb: (() => void) | null } = { cb: null };
   const barPolishError: { cb: ((p: { message: string }) => void) | null } = { cb: null };
+  // 采纳写回的返回值由每条用例自己摆：默认「成功」，Task 7 的失败分支按 reason 改。
+  // 它必须**显式**挂在假 bridge 上 —— `...real` 复制不到 contextBridge 的非枚举属性
+  // （见本文件 copy 那段的注释）。缺了它 App 调 vp.adoptPaste() 会抛 TypeError，
+  // async 函数静默 reject，表现是「点了采纳毫无反应」。
+  // 类型直接取自桥的返回类型（而不是字面写 reason: string）—— 后者给不出接口要求的
+  // reason 字面量联合，假 bridge 赋给 bridge prop 时 typecheck 会红。
+  const adoptPasteCtl: {
+    result: Awaited<ReturnType<Window['voicepilot']['adoptPaste']>>;
+    calls: number;
+  } = {
+    result: { ok: true },
+    calls: 0,
+  };
   let captureStarted = false;
   let captureStopped = false;
   // 初值给空函数而不是 null：这样类型是「永远可调用」，
@@ -113,6 +126,10 @@ export async function runUiTest() {
       copyCtl.text = text;
       lastCopy = real.copy(text);
       return lastCopy;
+    },
+    adoptPaste: () => {
+      adoptPasteCtl.calls += 1;
+      return Promise.resolve(adoptPasteCtl.result);
     },
     reportPainted: (at: number) => real.reportPainted(at),
     openStudio: (payload: { text: string; historyId?: number }) => {
@@ -845,6 +862,7 @@ export async function runUiTest() {
       return Promise.resolve(true);
     };
   }
+  const toggleBefore = toggleCount;
   clickButton('采纳');
   await flush();
   // 同上：显式断言绕开流收窄，否则 adoptCall.payload 被判成 never
@@ -860,20 +878,13 @@ export async function runUiTest() {
   check('采纳回写携带会话历史 id',
     barAdopted?.id === 1, JSON.stringify(barAdopted));
 
-  // Finding 1：采纳成功只能有一条提示。两个提示节点现在有各自的 testid
-  // （bar-hint-copied / bar-hint-adopt），按前缀一次性取全，断言**节点数 +
-  // 每个节点的 id 与精确文本**：若 adopt 又 setCopied(true)，会多出一个
-  // id=bar-hint-copied、文本为 '已复制到剪贴板' 的节点，length===1 与
-  // 「无节点文本等于 bar.copied」两条同时破，断言必红（即双重提示回归）。
-  const adoptHintNodes = Array.from(
-    container.querySelectorAll('[data-testid^="bar-hint"]')
-  ).map((n) => ({ id: n.getAttribute('data-testid'), text: n.textContent }));
-  check('采纳成功后提示区只有兜底一条、不含 bar.copied',
-    adoptHintNodes.length === 1 &&
-      adoptHintNodes[0].id === 'bar-hint-adopt' &&
-      adoptHintNodes[0].text === '已复制到剪贴板，请手动粘贴（自动写回尚未实现）' &&
-      adoptHintNodes.every((n) => n.text !== '已复制到剪贴板'),
-    JSON.stringify(adoptHintNodes));
+  // 采纳成功 = 真写回成功 → 悬浮条关闭，且**不该有任何提示**。
+  // 旧形态（复制 + 兜底提示）已不存在：提示只在写回失败时出现。
+  check('采纳成功时调用了写回通道', adoptPasteCtl.calls === 1, `${adoptPasteCtl.calls} 次`);
+  check('采纳成功后关闭悬浮条', toggleCount === toggleBefore + 1, `${toggleBefore} → ${toggleCount}`);
+  check('采纳成功不留任何提示节点',
+    container.querySelectorAll('[data-testid^="bar-hint"]').length === 0,
+    JSON.stringify(Array.from(container.querySelectorAll('[data-testid^="bar-hint"]')).map((n) => n.textContent)));
 
   // ---- 24. 无预设路径：runPolish 早退必须给明确提示、且不渲染结果区 ----
   // 既有假 bridge 的 polishPresets 恒返回预设，runPolish 里 `!scene || !tone` 的
