@@ -1,3 +1,4 @@
+import { clipboard } from 'electron';
 import * as win from './win.js';
 import * as mac from './mac.js';
 
@@ -46,8 +47,18 @@ export function captureTarget() {
 export async function pasteWith(platform, target) {
   const result = await decidePaste(platform, target);
   // 唯一出口处统一打一行：真机排障时「到底走到哪个分支」是最先要看的东西。
+  // 顺带报一下剪贴板长度 —— 它是整条链的前提，而「粘贴没发生」极容易是
+  // 「发键那一刻剪贴板其实是空的」伪装成的。
   if (process.env.VP_INJECT_DEBUG === '1') {
-    console.log(`[注入] 编排结果: ${result.ok ? 'ok' : `失败 reason=${result.reason}`}`);
+    let clipLen = '?';
+    try {
+      clipLen = (await clipboard.readText()).length;
+    } catch {
+      /* 读剪贴板失败不影响主流程 */
+    }
+    console.log(
+      `[注入] 编排结果: ${result.ok ? 'ok' : `失败 reason=${result.reason}`} | 发键后剪贴板长度=${clipLen}`
+    );
   }
   return result;
 }

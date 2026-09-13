@@ -10,7 +10,15 @@ import koffi from 'koffi';
 const SW_RESTORE = 9;
 const VK_CONTROL = 0x11;
 const VK_V = 0x56;
+const VK_A = 0x41;
+const VK_Z = 0x5a;
 const KEYEVENTF_KEYUP = 0x0002;
+// 诊断用：换掉「要发什么键」，用来区分失败发生在哪一段。
+//   type      —— 只发一个字面字符 z：若它进不去，说明按键**根本没被目标收到**
+//   selectall —— 发 Ctrl+A：在 Word/浏览器/终端里都有可见效果且不破坏内容
+//   scancode  —— 仍发 Ctrl+V，但把 bScan 填成真实扫描码（MapVirtualKey）
+// 不设 = 现状（Ctrl+V，bScan=0）。
+const PROBE = process.env.VP_INJECT_PROBE ?? '';
 // 置前是异步的：SetForegroundWindow 返回时目标未必已经真的拿到前台。
 // 60ms 是起点不是承诺（spec §8 第 7 条），真机不合就在 Task 8 调。
 const ACTIVATE_WAIT_MS = 60;
@@ -84,6 +92,7 @@ function lib() {
     // 字节），写错了不报错、只是静默不生效。keybd_event 已废弃但仍在 user32 里工作，
     // 签名只有四个标量参数。
     keybd_event: user32.func('void keybd_event(uint8 bVk, uint8 bScan, uint32 dwFlags, uintptr_t dwExtraInfo)'),
+    MapVirtualKeyW: user32.func('uint32 MapVirtualKeyW(uint32 uCode, uint32 uMapType)'),
   };
   return api;
 }
@@ -163,10 +172,31 @@ export function sendPaste() {
         (foc ? ` = ${describeWindow(foc)}` : '（无焦点窗口：按键会被丢弃）')
     );
   }
-  a.keybd_event(VK_CONTROL, 0, 0, 0);
-  a.keybd_event(VK_V, 0, 0, 0);
-  a.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0);
-  a.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+  // 诊断：只发一个字面字符。若它在目标里都不出现，说明目标**根本没收到**我们注入的
+  // 按键（而不是"收到了但粘贴没发生"）—— 这两条的修法完全不同。
+  if (PROBE === 'type') {
+    dbg('探针模式 type：只发一个 z');
+    a.keybd_event(VK_Z, 0, 0, 0);
+    a.keybd_event(VK_Z, 0, KEYEVENTF_KEYUP, 0);
+    return;
+  }
+  // 诊断：Ctrl+A。在 Word / 浏览器 / 终端里都有可见效果，且不破坏内容。
+  if (PROBE === 'selectall') {
+    dbg('探针模式 selectall：发 Ctrl+A');
+    a.keybd_event(VK_CONTROL, 0, 0, 0);
+    a.keybd_event(VK_A, 0, 0, 0);
+    a.keybd_event(VK_A, 0, KEYEVENTF_KEYUP, 0);
+    a.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+    return;
+  }
+  // bScan：现状一律传 0。部分应用（尤其 Chromium 系与 Office）会参考扫描码，
+  // 传 0 可能被当成无效键丢弃 —— 这是待验证的候选根因之一，故做成可切换的探针。
+  const scan = (vk) => (PROBE === 'scancode' ? a.MapVirtualKeyW(vk, 0) : 0);
+  if (PROBE === 'scancode') dbg(`探针模式 scancode：Ctrl+V，扫描码 ctrl=${scan(VK_CONTROL)} v=${scan(VK_V)}`);
+  a.keybd_event(VK_CONTROL, scan(VK_CONTROL), 0, 0);
+  a.keybd_event(VK_V, scan(VK_V), 0, 0);
+  a.keybd_event(VK_V, scan(VK_V), KEYEVENTF_KEYUP, 0);
+  a.keybd_event(VK_CONTROL, scan(VK_CONTROL), KEYEVENTF_KEYUP, 0);
 }
 
 /**
@@ -217,7 +247,9 @@ export async function activate(target) {
 
   if (DEBUG) {
     dbg(`目标窗口 ${hwnd} = ${describeWindow(hwnd)}`);
-    dbg(`置前前: 前台=${readForeground()} 目标线程=${targetTid}`);
+    // 注意：这是 SetForegroundWindow **之后**的读数。激活是异步的，此刻前台常为
+    // null（窗口正在交接），13ms 量级后才稳定 —— 不要把它当异常。
+    dbg(`置前后: 前台=${readForeground()} 目标线程=${targetTid}`);
   }
 
   for (;;) {
