@@ -514,7 +514,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       try {
         await vp.adoptPolish({
           // 必须显式带上本条会话的历史 id，理由见 2A 的 Critical 修复（ee1ab8a）。
-          id: historyIdRef.current ?? undefined,
+          // 保留 null：显式 null 表示「本次没有历史行」，主进程不会回落到
+          // Studio 的 pendingHistoryId（那会写错行）。只有 Studio 一路才省略 id。
+          id: historyIdRef.current,
           polished: polishOut,
           scene: scene?.name ?? '',
           tone: tone?.name ?? '',

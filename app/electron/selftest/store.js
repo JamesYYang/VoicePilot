@@ -3,7 +3,7 @@ import {
   openStore, openStoreWithDb, saveHistory, listHistory, getHistory, updateHistoryPolish,
   updateHistoryText,
   deleteHistory, listPresets, savePreset, deletePreset, getMeta, setMeta, migrateDefaultScene,
-  getShortcut, setShortcut,
+  getShortcut, setShortcut, resolvePolishTarget,
 } from '../store.js';
 
 export async function runStoreSelftest() {
@@ -124,11 +124,19 @@ export async function runStoreSelftest() {
     edited?.id === editId &&
     edited?.duration_ms === 1000;
 
+  // 采纳润色的目标行选择。第二条是本次修的活雷：显式 null 必须**不**回落，
+  // 否则悬浮条历史落库失败时，润色结果会写进 Studio 上次打开的那条无关记录。
+  const okTargetExplicitNull = resolvePolishTarget(null, 42) === null;
+  const okTargetFallback = resolvePolishTarget(undefined, 42) === 42;
+  const okTargetExplicitId = resolvePolishTarget(7, 42) === 7;
+  const okTargetNoPending = resolvePolishTarget(undefined, null) === null;
+
   const ok = okSeed && okWrite && okUpdate && okDelHistory && okDelGone && okDelMissing && okAdd && okEdit && okBuiltinKeep && okDel && okMeta && okTrilingual &&
     okMigrateMiss && okMigrateHit && okMigrateIdem &&
     okMigrateBackfill && okMigrateList && okMigrateBackfillIdem &&
     okShortcutDefault && okShortcutSet && okShortcutOverwrite &&
-    okUpdateText;
-  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem} 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite} 更新正文=${okUpdateText}`);
+    okUpdateText &&
+    okTargetExplicitNull && okTargetFallback && okTargetExplicitId && okTargetNoPending;
+  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem} 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite} 更新正文=${okUpdateText} 采纳目标行=${okTargetExplicitNull && okTargetFallback && okTargetExplicitId && okTargetNoPending}`);
   return { ok };
 }

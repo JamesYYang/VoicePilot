@@ -8,7 +8,7 @@ import { createStudioWindow, getStudioWindow } from './studio.js';
 import { getOnboardingWindow } from './onboarding.js';
 import { getKeyEntryWindow } from './key-entry.js';
 import { saveCredentials } from './asr/config.js';
-import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, updateHistoryText, deleteHistory, getShortcut, setShortcut } from './store.js';
+import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, updateHistoryText, deleteHistory, getShortcut, setShortcut, resolvePolishTarget } from './store.js';
 import { streamPolish } from './llm/polish.js';
 import { applyShortcut, currentAccel, defaultAccel, setShortcutSuspended } from './shortcut.js';
 import { pasteTo } from './inject/index.js';
@@ -449,14 +449,12 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
   /**
    * 采用润色结果：把润色文本 + 场景/语气回写进本次会话的历史条目。
    *
-   * id 优先：悬浮条（bar）自己发起的会话与主应用窗口无关，必须显式带上本条
-   * 历史的 id。省略时才回退到 pendingHistoryId —— 那是 Studio 一路的旧行为：
-   * 主应用经 vp:studio/open 打开时设下该值，Studio 采纳时不再单独传 id。
-   * 悬浮条不设 pendingHistoryId，所以以前这里要么写不进去（null），要么写错行
-   * （上一次「打开应用」留下的陈旧 id）。
+   * 目标行的选择见 resolvePolishTarget：显式 null 表示「本次没有历史行」，
+   * **不得**回落到 pendingHistoryId —— 悬浮条的历史落库失败时 id 就是 null，
+   * 回落会把润色结果写进 Studio 上一次打开的那条无关记录。
    */
   ipcMain.handle('vp:polish/adopt', (_e, { id, polished, scene, tone }) => {
-    const target = id != null ? Number(id) : pendingHistoryId;
+    const target = resolvePolishTarget(id, pendingHistoryId);
     if (target != null) {
       updateHistoryPolish(target, { polished, scene, tone });
     }

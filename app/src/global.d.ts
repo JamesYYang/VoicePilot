@@ -101,8 +101,12 @@ interface VoicePilotBridge {
   historyDelete(id: number): Promise<boolean>;
   /** 编辑后更新同一条历史的正文 */
   historyUpdateText(payload: { id: number; text: string }): Promise<boolean>;
-  /** 采用润色结果，回写历史。id 指定目标历史行；省略时主进程回退到 Studio 的 pendingHistoryId */
-  adoptPolish(payload: { id?: number; polished: string; scene: string; tone: string }): Promise<boolean>;
+  /**
+   * 采用润色结果，回写历史。
+   * id 显式传 null = 本次没有历史行（例如从常用语来的采纳），主进程**不会**回落；
+   * 整个字段省略 = Studio 一路，主进程回落到 pendingHistoryId。
+   */
+  adoptPolish(payload: { id?: number | null; polished: string; scene: string; tone: string }): Promise<boolean>;
   /** 主应用挂载时拉 {text, scenes, tones, defaultSceneId} */
   syncStudio(): Promise<{ text: string; scenes: Preset[]; tones: Preset[]; defaultSceneId: number | null }>;
   /** 悬浮条润色所需的预设（不含文本） */

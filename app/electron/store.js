@@ -238,6 +238,27 @@ export function setMeta(key, value) {
     .run(key, String(value));
 }
 
+// ---------------------------------------------------------------- 采纳目标行
+
+/**
+ * 采纳润色结果时该写进哪一条历史。
+ *
+ * 三态必须分清，混起来就会写错行：
+ *   - `undefined`（**没传**这个字段）= Studio 一路的旧行为，回落到 pendingHistoryId；
+ *   - `null`（**显式传了空**）= 本次没有历史行（例如从常用语来的采纳），
+ *     **绝不能**回落到 pendingHistoryId —— 那会写进上次「打开应用」留下的陈旧行；
+ *   - 数字 = 就用它。
+ *
+ * 抽成纯函数是因为这条分支肉眼看不见、删掉也没测试会红。与 isBarFocusable /
+ * classifyForeground 同一个理由。
+ */
+export function resolvePolishTarget(id, pendingHistoryId) {
+  if (id === undefined) return pendingHistoryId ?? null;
+  if (id === null) return null;
+  const n = Number(id);
+  return Number.isFinite(n) ? n : null;
+}
+
 // ---------------------------------------------------------------- 快捷键
 
 const SHORTCUT_KEY = 'shortcut';

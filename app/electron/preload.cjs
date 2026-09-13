@@ -226,8 +226,10 @@ contextBridge.exposeInMainWorld('voicepilot', {
 
   /**
    * 采用润色结果，回写历史。
-   * payload: { id?: number, polished, scene, tone } —— 悬浮条必须带 id
-   * （本条会话的历史行）；Studio 一路可省略，由主进程回退到 pendingHistoryId。
+   * payload: { id?: number | null, polished, scene, tone }
+   *   - 悬浮条**显式带 id**（本条会话的历史行）；没有历史行时传 null，
+   *     主进程不会回落到 pendingHistoryId；
+   *   - Studio 一路可整体省略 id，由主进程回落到 pendingHistoryId。
    */
   adoptPolish(payload) {
     return ipcRenderer.invoke('vp:polish/adopt', payload);
