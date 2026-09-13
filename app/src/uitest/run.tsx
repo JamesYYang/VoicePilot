@@ -863,8 +863,13 @@ export async function runUiTest() {
     };
   }
   const toggleBefore = toggleCount;
+  // 采纳链里含**真实的** vp.copy（跨进程 + 剪贴板写入，剪贴板被占用时能到数秒），
+  // 所以这里一律用 waitFor 等条件成立，**不能**用固定 30ms 的 flush ——
+  // 否则断言跑在实际结果之前，表现为间歇性红（本文件顶部 waitFor 的注释就是为此写的）。
+  const adoptHintText = () =>
+    container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent ?? null;
   clickButton('采纳');
-  await flush();
+  await waitFor(() => toggleCount === toggleBefore + 1);
   // 同上：显式断言绕开流收窄，否则 adoptCall.payload 被判成 never
   const barAdopted = adoptCall.payload as
     { id?: number; polished: string; scene: string; tone: string } | null;
@@ -896,36 +901,33 @@ export async function runUiTest() {
   adoptPasteCtl.result = { ok: false, reason: 'activate-failed' };
   adoptPasteCtl.calls = 0;
   clickButton('采纳');
-  await flush();
+  await waitFor(() => adoptHintText() === '自动写回失败，已复制到剪贴板，请手动粘贴');
   check('写回失败时确实调了写回通道', adoptPasteCtl.calls === 1, `${adoptPasteCtl.calls} 次`);
   check('写回失败时不关闭悬浮条', toggleCount === toggleBeforeFail,
     `${toggleBeforeFail} → ${toggleCount}`);
   check('写回失败时剪贴板已写好（不还原）', copyCtl.text !== null, JSON.stringify(copyCtl.text));
   check('activate-failed 给出通用失败提示',
-    container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent ===
-      '自动写回失败，已复制到剪贴板，请手动粘贴',
-    JSON.stringify(container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent));
+    adoptHintText() === '自动写回失败，已复制到剪贴板，请手动粘贴',
+    JSON.stringify(adoptHintText()));
 
   // permission 必须给**不同**的文案：它是唯一可操作的失败（去授权），
   // 若与通用文案混同，macOS 用户拿不到「该去授权」这个提示。
   await enterReviewing();
   adoptPasteCtl.result = { ok: false, reason: 'permission' };
   clickButton('采纳');
-  await flush();
+  await waitFor(() => adoptHintText() === '未获得辅助功能权限，无法自动写回。已复制到剪贴板，请手动粘贴');
   check('permission 给出可操作的不同文案',
-    container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent ===
-      '未获得辅助功能权限，无法自动写回。已复制到剪贴板，请手动粘贴',
-    JSON.stringify(container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent));
+    adoptHintText() === '未获得辅助功能权限，无法自动写回。已复制到剪贴板，请手动粘贴',
+    JSON.stringify(adoptHintText()));
 
   // stale 同理，指向「目标窗口没了」这个具体原因。
   await enterReviewing();
   adoptPasteCtl.result = { ok: false, reason: 'stale' };
   clickButton('采纳');
-  await flush();
+  await waitFor(() => adoptHintText() === '目标窗口已关闭，已复制到剪贴板，请手动粘贴');
   check('stale 指出目标窗口已关闭',
-    container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent ===
-      '目标窗口已关闭，已复制到剪贴板，请手动粘贴',
-    JSON.stringify(container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent));
+    adoptHintText() === '目标窗口已关闭，已复制到剪贴板，请手动粘贴',
+    JSON.stringify(adoptHintText()));
 
   // 复位，避免影响后面的用例（第 24 段起还会复用这棵 App 树）
   adoptPasteCtl.result = { ok: true };
