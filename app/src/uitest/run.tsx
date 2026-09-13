@@ -42,7 +42,7 @@ const waitFor = async (cond: () => boolean, timeout = 8000) => {
   return false;
 };
 
-const IDLE = { state: 'idle', notice: null, truncated: false } as const;
+const IDLE = { state: 'idle', notice: null, truncated: false, origin: 'dictation' } as const;
 
 export async function runUiTest() {
   console.log('=== 悬浮条界面自测 ===');
@@ -93,6 +93,12 @@ export async function runUiTest() {
     result: { ok: true },
     calls: 0,
   };
+  const phraseSaveCtl: { payload: { title: string; text: string } | null } = { payload: null };
+  let togglePhrasesCalls = 0;
+  let usePhraseCalls = 0;
+  const touchedIds: number[] = [];
+  // 选择器列表由每条用例自己摆（顺序即主进程给的「最近使用优先」）。
+  let phraseRows: PhraseRow[] = [];
   let captureStarted = false;
   let captureStopped = false;
   // 初值给空函数而不是 null：这样类型是「永远可调用」，
@@ -165,6 +171,23 @@ export async function runUiTest() {
       adoptCall.payload = payload;
       return Promise.resolve(true);
     },
+    togglePhrases: () => {
+      togglePhrasesCalls += 1;
+      return Promise.resolve(IDLE);
+    },
+    usePhrase: () => {
+      usePhraseCalls += 1;
+      return Promise.resolve(IDLE);
+    },
+    phrasesList: () => Promise.resolve(phraseRows),
+    phrasesTouch: (id: number) => {
+      touchedIds.push(id);
+      return Promise.resolve(true);
+    },
+    phrasesSave: (payload: { title: string; text: string }) => {
+      phraseSaveCtl.payload = payload;
+      return Promise.resolve({ id: 99 });
+    },
     onPolishDelta: (cb: (p: { text: string }) => void) => {
       barPolishDelta.cb = cb;
       return () => {};
@@ -222,7 +245,7 @@ export async function runUiTest() {
   check('idle 时不渲染任何东西', container.textContent === '', JSON.stringify(container.textContent));
 
   // ---- 2. warming：出现并开始采集 ----
-  fire('state', { state: 'warming', notice: null, truncated: false });
+  fire('state', { state: 'warming', notice: null, truncated: false, origin: 'dictation' });
   await flush();
   check('warming 渲染出「准备中」', container.textContent?.includes('准备中'));
   // 用真值判断而非 ===true：TS 会把 `let x = false` 在流里收窄成字面量 false，
@@ -237,7 +260,7 @@ export async function runUiTest() {
     JSON.stringify(sentFrames[0]));
 
   // ---- 4. listening + 草稿 ----
-  fire('state', { state: 'listening', notice: null, truncated: false });
+  fire('state', { state: 'listening', notice: null, truncated: false, origin: 'dictation' });
   fire('partial', {
     recvAtMs: Date.now(),
     text: '今天我们要讨论',
@@ -312,7 +335,7 @@ export async function runUiTest() {
     JSON.stringify(committedEl?.textContent));
 
   // ---- 6. reviewing + 复制（走真实 IPC，主进程读回剪贴板核对）----
-  fire('state', { state: 'reviewing', notice: null, truncated: false });
+  fire('state', { state: 'reviewing', notice: null, truncated: false, origin: 'dictation' });
   await flush();
   const buttons = Array.from(container.querySelectorAll('button'));
   check('reviewing 出现「复制」按钮', buttons.some((b) => b.textContent === '复制'));
@@ -366,7 +389,7 @@ export async function runUiTest() {
     JSON.stringify(copyCtl.text));
 
   // ---- 6.5 润色 + 历史保存：进入 reviewing 时原文已写入历史一次 ----
-  fire('state', { state: 'reviewing', notice: null, truncated: false });
+  fire('state', { state: 'reviewing', notice: null, truncated: false, origin: 'dictation' });
   await flush();
   check('reviewing 时已调用 historySave 且带全文',
     historySaveCtl.payload?.text === expectedCommittedText,
@@ -384,7 +407,7 @@ export async function runUiTest() {
   check('点「打开应用」后悬浮条关闭（触发 toggle）', toggleCount === 1, `toggle 调用 ${toggleCount} 次`);
 
   // ---- 7. 背压：未确认帧数超上限就丢 ----
-  fire('state', { state: 'listening', notice: null, truncated: false });
+  fire('state', { state: 'listening', notice: null, truncated: false, origin: 'dictation' });
   await flush();
   // 先把之前那 1 帧的回执补上，让未确认计数归零，否则上限要减掉它
   fire('ack', { seq: 1, pending: 0 });
@@ -405,14 +428,14 @@ export async function runUiTest() {
 
   // ---- 8. 采集失败（A7：麦克风被占用时必须看得见）----
   // 回到 idle 再重新触发，让采集源以失败的方式启动一次
-  fire('state', { state: 'idle', notice: null, truncated: false });
+  fire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
   await flush();
   failCapture = true;
   let captureFailReported = false;
   bridge.captureFailed = () => {
     captureFailReported = true;
   };
-  fire('state', { state: 'warming', notice: null, truncated: false });
+  fire('state', { state: 'warming', notice: null, truncated: false, origin: 'dictation' });
   await waitFor(() => captureFailReported);
   check('采集失败上报主进程', captureFailReported);
   check('采集失败在界面上有明确提示',
@@ -421,7 +444,7 @@ export async function runUiTest() {
 
   // 状态机随后会回到 idle，但错误要再多停几秒（App.tsx 的 ERROR_HOLD_MS），
   // 否则用户只看到悬浮条闪了一下，等于没提示
-  fire('state', { state: 'idle', notice: null, truncated: false });
+  fire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
   await flush();
   check('回到 idle 后错误仍停留可见',
     container.textContent?.includes('麦克风不可用') === true,
@@ -721,11 +744,11 @@ export async function runUiTest() {
   // ---- 22. 悬浮条内闭环：可编辑 + 按钮集 + 折叠区 ----
   // 进入一次干净的 reviewing：先回 idle 清场，再喂四句定稿 + 切 reviewing
   const enterReviewing = async () => {
-    fire('state', { state: 'idle', notice: null, truncated: false });
+    fire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
     await flush();
-    fire('state', { state: 'warming', notice: null, truncated: false });
+    fire('state', { state: 'warming', notice: null, truncated: false, origin: 'dictation' });
     await flush();
-    fire('state', { state: 'listening', notice: null, truncated: false });
+    fire('state', { state: 'listening', notice: null, truncated: false, origin: 'dictation' });
     for (const text of ['今天我们要讨论三件事', '第一件是采集', '第二件是识别', '第三件是润色']) {
       // 按 AsrPartial 的完整形状 fire：fire() 的载荷类型就是这个接口，
       // 少字段 TS 直接红（本文件既有的 partial 调用也都带全）。
@@ -739,7 +762,7 @@ export async function runUiTest() {
         words: [],
       });
     }
-    fire('state', { state: 'reviewing', notice: null, truncated: false });
+    fire('state', { state: 'reviewing', notice: null, truncated: false, origin: 'dictation' });
     await flush();
     return container;
   };
@@ -953,6 +976,12 @@ export async function runUiTest() {
     },
     polishPresets: () =>
       Promise.resolve({ scenes: [], tones: [], defaultSceneId: null }),
+    // 这棵树不测润色流。三个监听器必须显式占住空实现：bridge 的 onPolishDelta
+    // 是**单槽** holder（barPolishDelta.cb），这棵树若继承它，挂载时就会把主树的
+    // 回调挤掉 —— 第 25 段给主树送 delta 会送到这棵树来，主树的 polishOut 永远为空。
+    onPolishDelta: () => () => {},
+    onPolishDone: () => () => {},
+    onPolishError: () => () => {},
   };
   const npContainer = document.createElement('div');
   document.body.appendChild(npContainer);
@@ -972,11 +1001,11 @@ export async function runUiTest() {
   };
 
   // 与 enterReviewing 同款顺序驱动这棵树：idle → warming → listening → 定稿 → reviewing
-  npFire('state', { state: 'idle', notice: null, truncated: false });
+  npFire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
   await flush();
-  npFire('state', { state: 'warming', notice: null, truncated: false });
+  npFire('state', { state: 'warming', notice: null, truncated: false, origin: 'dictation' });
   await flush();
-  npFire('state', { state: 'listening', notice: null, truncated: false });
+  npFire('state', { state: 'listening', notice: null, truncated: false, origin: 'dictation' });
   npFire('partial', {
     text: '无预设也要给提示',
     sentenceEnd: true,
@@ -986,7 +1015,7 @@ export async function runUiTest() {
     endTime: null,
     words: [],
   });
-  npFire('state', { state: 'reviewing', notice: null, truncated: false });
+  npFire('state', { state: 'reviewing', notice: null, truncated: false, origin: 'dictation' });
   await flush();
   check('无预设：进入 reviewing 后可编辑区可见',
     npContainer.querySelector('[data-testid="bar-editor"]') != null);
@@ -1000,6 +1029,149 @@ export async function runUiTest() {
   // (b) 早退证据：runPolish 在 setPolishing 之前就返回，润色结果区不该出现
   check('无预设时 runPolish 早退，不渲染润色结果区',
     npContainer.querySelector('[data-testid="bar-polish-output"]') == null);
+
+  // ---- 25. 常用语选择器：搜索 / 键盘导航 / Enter 选中 / Esc 关闭 / 占位 ----
+  // 不能用 enterReviewing()：那条路会经过 warming 并把文本灌成 fullText。
+  // 常用语一路是 idle → phrases，正文完全来自 phraseText。
+  phraseRows = [
+    { id: 1, title: '问候', text: '您好，收到您的反馈，我先看一下。', created_at: 2, updated_at: 2, used_at: null },
+    { id: 2, title: '收尾', text: '有问题随时找我。', created_at: 1, updated_at: 1, used_at: null },
+  ];
+  const enterPhrases = async () => {
+    fire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
+    await flush();
+    fire('state', { state: 'phrases', notice: null, truncated: false, origin: 'dictation' });
+    await waitFor(() => container.querySelector('[data-testid="phrase-item"]') != null);
+    return container;
+  };
+  const items = () => Array.from(container.querySelectorAll('[data-testid="phrase-item"]'));
+  const activeIndex = () => items().findIndex((n) => n.getAttribute('data-active') === 'true');
+
+  // 先走一次 idle → warming → idle：真实里上一段听写结束后，常用语是从一个干净的
+  // idle 进来的。warming 会把 historyIdRef / committed / draft / polishOut 一并复位 ——
+  // 下面「编辑区不是空的 fullText」与「采纳携带显式 null id」两条断言都以此为前提，
+  // 少了这一趟它们会落在上一段听写残留的会话状态上（id 非 null、fullText 非空）。
+  // failCapture 也要复位：第 8 段把它置成 true 后一直没清，采集起点会直接抛错，
+  // 那样「phrases 态不启动采集」就永远绿，测不出任何回归。
+  failCapture = false;
+  fire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
+  await flush();
+  fire('state', { state: 'warming', notice: null, truncated: false, origin: 'dictation' });
+  await flush();
+  fire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
+  await flush();
+
+  await enterPhrases();
+  // 「phrases 态绝不启动采集」（spec §1.6）：清掉标志位再进一次态，断言它保持 false。
+  // 这是「不说话直接选一条」不产生任何识别费用的唯一证据。
+  captureStarted = false;
+  await enterPhrases();
+  check('phrases 态不启动采集（不建 ASR 会话、不产生识别费用）',
+    captureStarted === false, String(captureStarted));
+  check('选择器渲染搜索框与两条常用语',
+    container.querySelector('[data-testid="phrase-search"]') != null && items().length === 2,
+    JSON.stringify(items().map((n) => n.textContent)));
+  check('默认高亮第一条', activeIndex() === 0, String(activeIndex()));
+
+  const search = container.querySelector<HTMLInputElement>('[data-testid="phrase-search"]');
+  const typeSearch = (v: string) => {
+    // 与 bar-editor 同一坑：React 在 input 上装了 value tracker，直接赋值会被
+    // 认为「值没变」而不触发 onChange。必须走原型上的原生 setter。
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(search, v);
+    search?.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  typeSearch('收尾');
+  await flush();
+  check('输入即筛选（标题命中）', items().length === 1, String(items().length));
+
+  typeSearch('反馈');
+  await flush();
+  check('输入即筛选（正文也匹配）', items().length === 1, String(items().length));
+
+  typeSearch('不存在的词');
+  await flush();
+  check('无匹配时显示占位、不显示条目',
+    items().length === 0 && container.querySelector('[data-testid="phrases-empty"]') != null,
+    JSON.stringify(container.querySelector('[data-testid="phrases-empty"]')?.textContent));
+
+  typeSearch('');
+  await flush();
+  check('清空查询后恢复全部', items().length === 2, String(items().length));
+
+  // 方向键：↓ 到第二条、↑ 回第一条
+  search?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  await flush();
+  check('↓ 移到第二条', activeIndex() === 1, String(activeIndex()));
+  search?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+  await flush();
+  check('↑ 回到第一条', activeIndex() === 0, String(activeIndex()));
+
+  // Enter 选中：正文进编辑区、记一次 touch、状态机切 reviewing
+  usePhraseCalls = 0;
+  touchedIds.length = 0;
+  search?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await flush();
+  check('Enter 调了一次 usePhrase', usePhraseCalls === 1, String(usePhraseCalls));
+  check('Enter 记了一次「被用过」（id 与高亮项一致）',
+    JSON.stringify(touchedIds) === JSON.stringify([1]), JSON.stringify(touchedIds));
+
+  fire('state', { state: 'reviewing', notice: null, truncated: false, origin: 'phrase' });
+  await flush();
+  const phraseEditor = () => container.querySelector<HTMLTextAreaElement>('[data-testid="bar-editor"]');
+  check('选中后编辑区内容是那条常用语的正文（不是空的 fullText）',
+    phraseEditor()?.value === '您好，收到您的反馈，我先看一下。',
+    JSON.stringify(phraseEditor()?.value));
+
+  // 「常用语不落历史」：origin=phrase 时**不得**调 historySave。
+  historySaveCtl.payload = null;
+  await flush();
+  check('常用语来的 reviewing 不落历史（origin=phrase）',
+    historySaveCtl.payload === null, JSON.stringify(historySaveCtl.payload));
+
+  // Task 1 遗留：钉住 store.js 的 resolvePolishTarget 三态契约 ——
+  // **显式 id=null**（＝本次没有历史行，主进程不回落 pendingHistoryId）与
+  // 整个 id 字段缺省（＝Studio 一路，回落）是两种语义，必须能从载荷上区分开。
+  // 常用语一路不写历史，historyIdRef 停在 warming 复位后的 null，正是这条路径。
+  // 要先有润色结果 adopt 才会走回写分支，所以先点润色、再灌一段 delta。
+  clickButton('润色');
+  await flush();
+  barPolishDelta.cb?.({ text: '常用语的润色结果' });
+  await flush();
+  adoptCall.payload = null;
+  clickButton('采纳');
+  await waitFor(() => adoptCall.payload != null);
+  // 显式断言绕开 TS 对对象属性的流收窄（上面刚赋过 null，否则被收窄成 never）
+  const phraseAdopted = adoptCall.payload as { id?: number | null; polished: string } | null;
+  check('常用语采纳回写携带显式 null id（不回落 pendingHistoryId）',
+    phraseAdopted != null && 'id' in phraseAdopted && phraseAdopted.id === null,
+    JSON.stringify(phraseAdopted));
+  await flush();
+
+  // 对照：听写来的 reviewing 必须落历史（否则上面那条可能只是因为 effect 没跑）
+  await enterReviewing();
+  check('听写来的 reviewing 照旧落历史（origin=dictation）',
+    historySaveCtl.payload != null &&
+      (historySaveCtl.payload as { text: string }).text.includes('今天我们要讨论三件事'),
+    JSON.stringify(historySaveCtl.payload));
+
+  // Esc 关闭选择器
+  await enterPhrases();
+  togglePhrasesCalls = 0;
+  container
+    .querySelector<HTMLInputElement>('[data-testid="phrase-search"]')
+    ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await flush();
+  check('Esc 调了一次 togglePhrases', togglePhrasesCalls === 1, String(togglePhrasesCalls));
+
+  // 空库占位：给「去存一条」的引导，而不是「没有匹配」
+  phraseRows = [];
+  await enterPhrases();
+  check('空库显示引导文案（不是「没有匹配」）',
+    container.querySelector('[data-testid="phrases-empty"]')?.textContent ===
+      '还没有常用语。在结果里点书签图标存一条。',
+    JSON.stringify(container.querySelector('[data-testid="phrases-empty"]')?.textContent));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

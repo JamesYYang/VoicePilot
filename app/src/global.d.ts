@@ -9,9 +9,11 @@ interface Preset {
 }
 
 interface SessionSnapshot {
-  state: 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing';
+  state: 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing' | 'phrases';
   notice: { kind: string; message: string; attempt: number; maxAttempts: number } | null;
   truncated: boolean;
+  /** 本次 reviewing 的文本从哪来。常用语不落历史就靠它判（spec §2.3）。 */
+  origin: 'dictation' | 'phrase';
 }
 
 /** 一条常用语。字段名与 store.js 的 SELECT 一致。 */

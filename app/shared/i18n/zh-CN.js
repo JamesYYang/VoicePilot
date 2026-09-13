@@ -25,6 +25,10 @@ export const zhCN = {
   'bar.err.asr': '识别服务出错，已保留已识别内容',
   'bar.err.polishStart': '润色请求未发出，请重试',
   'bar.err.noPresets': '未能加载润色预设，请稍后重试',
+  'bar.phrases.title': '常用语',
+  'bar.phrases.searchPlaceholder': '搜索常用语',
+  'bar.phrases.empty': '还没有常用语。在结果里点书签图标存一条。',
+  'bar.phrases.noMatch': '没有匹配的常用语',
   // 主应用导航
   'studio.polish': '润色',
   'studio.history': '历史',

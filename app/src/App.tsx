@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, Ref } from 'react';
+// KeyboardEvent 要按类型单独引入并改名：写 React.KeyboardEvent 需要 React 命名空间
+// （本文件没有 `import React`），而裸 KeyboardEvent 会被解析成 DOM 的全局类型。
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, Ref } from 'react';
 import { CaptureEngine } from './audio/capture';
 import { useT } from './i18n';
 
@@ -11,6 +13,8 @@ import { useT } from './i18n';
  * 1. **不抢焦点**（A2）。窗口本身 focusable:false，这里再补三条：不调用任何
  *    focus()、不用 autoFocus、不在挂载时做任何会激活窗口的事。显隐一律由
  *    主进程的 showInactive() 控制（见 electron/main.js）。
+ *    唯一例外是 phrases（常用语选择器）：它的全部价值就是键盘输入，故主进程在
+ *    该态把窗口 focusable 且 focus()，渲染侧也只在进态时给搜索框一次 DOM focus。
  * 2. **状态只有一个源头**。听写状态（idle/warming/listening/draining/reviewing）
  *    由主进程的状态机持有，这里只订阅与显示。界面上的「复制」等操作也只是
  *    向主进程发一个 toggle，不自己改状态 —— 否则两边迟早打架。
@@ -39,7 +43,7 @@ const BAR_EDITOR_MIN_HEIGHT = 96;
 /** 窗口高 = 根内容区 + 18：上下 margin 8×2 与 border 1×2，两者都不计入 scrollHeight/clientHeight。 */
 const BAR_MARGINS = 18;
 
-type SessionState = 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing';
+type SessionState = 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing' | 'phrases';
 
 interface Notice {
   kind: string;
@@ -52,6 +56,7 @@ interface Snapshot {
   state: SessionState;
   notice: Notice | null;
   truncated: boolean;
+  origin: 'dictation' | 'phrase';
 }
 
 interface Partial {
@@ -86,6 +91,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     listening: t('bar.listening'),
     draining: t('bar.draining'),
     reviewing: t('bar.reviewing'),
+    phrases: t('bar.phrases.title'),
     idle: '',
   };
 
@@ -106,7 +112,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     permission: t('bar.adopt.fail.permission'),
   };
 
-  const [snap, setSnap] = useState<Snapshot>({ state: 'idle', notice: null, truncated: false });
+  const [snap, setSnap] = useState<Snapshot>({
+    state: 'idle', notice: null, truncated: false, origin: 'dictation',
+  });
   const [committed, setCommitted] = useState<Committed[]>([]);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<{ kind: string; message: string } | null>(null);
@@ -128,6 +136,12 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   const [polishOut, setPolishOut] = useState('');
   const [polishing, setPolishing] = useState(false);
   const [polishError, setPolishError] = useState<string | null>(null);
+  // 常用语选择器。phraseText 是「选中那条的正文」—— 按既有约定「文本归渲染进程
+  // 所有」，它不进主进程，进 reviewing 时直接灌进编辑区。
+  const [phraseText, setPhraseText] = useState<string | null>(null);
+  const [phrases, setPhrases] = useState<PhraseRow[]>([]);
+  const [phraseQuery, setPhraseQuery] = useState('');
+  const [phraseIndex, setPhraseIndex] = useState(0);
 
   // 帧序号与未确认计数放在 ref：它们每 100ms 变一次，进 state 会白白重渲染
   const seqRef = useRef(0);
@@ -272,6 +286,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       setCopied(false);
       setEdited('');
       setHint('');
+      setPhraseText(null);
       // 上一段的润色结果/状态不能带到这一段
       setPolishOut('');
       setPolishing(false);
@@ -310,9 +325,10 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   }, [committed, draft]);
 
   // reviewing 一进来把派生文本灌进编辑区；之后 edited 就是唯一真源。
-  // 依赖数组**故意不含 fullText** —— 含进去会在用户每次打字后重跑并覆盖编辑内容。
+  // 依赖数组**故意不含 fullText / phraseText** —— 含进去会在用户每次打字后重跑
+  // 并覆盖编辑内容。常用语来的 reviewing 里 fullText 是空的，正文在 phraseText。
   useEffect(() => {
-    if (snap.state === 'reviewing') setEdited(fullText);
+    if (snap.state === 'reviewing') setEdited(phraseText ?? fullText);
   }, [snap.state]);
 
   // 拉预设（进入 reviewing 时，且只在没有时拉）。
@@ -355,6 +371,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 每次会话只存一次：historySavedRef 在 warming 时重置。
   useEffect(() => {
     if (snap.state !== 'reviewing') return;
+    // 常用语采纳不落历史（spec §2.3）：它不是「这次听写」的产物，反复用同一条
+    // 会在历史里刷屏，而它自己已经有管理页。判据来自状态机而不是本地启发式。
+    if (snap.origin !== 'dictation') return;
     if (historySavedRef.current) return;
     if (fullText.trim().length === 0) return;
     historySavedRef.current = true;
@@ -406,11 +425,88 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 非内容区占用 = root.scrollHeight - contentEl.clientHeight。
   const barRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (snap.state !== 'listening' && snap.state !== 'draining') return;
     const el = textRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [draft, committed, snap.state]);
+
+  // 进 phrases 态：拉一次列表、复位检索、把焦点给搜索框。
+  // 聚焦依赖主进程那边已经 focus() 过窗口（见 ipc.js 的 emit）—— DOM focus 只决定
+  // 键盘落在哪个元素上，窗口本身没被激活的话按键照样不来。
+  useEffect(() => {
+    if (snap.state !== 'phrases') return;
+    setPhraseQuery('');
+    setPhraseIndex(0);
+    void vp.phrasesList().then(setPhrases).catch(() => setPhrases([]));
+    searchRef.current?.focus();
+  }, [snap.state, vp]);
+
+  // 回 idle 清掉选中态，避免下一轮选择器带着上一条的正文。
+  useEffect(() => {
+    if (snap.state !== 'idle') return;
+    setPhraseText(null);
+    setPhraseQuery('');
+    setPhraseIndex(0);
+  }, [snap.state]);
+
+  /** 输入即筛选：标题与正文都匹配。空查询返回全部（主进程已按最近使用排好）。 */
+  const filteredPhrases = useMemo(() => {
+    const q = phraseQuery.trim().toLowerCase();
+    if (!q) return phrases;
+    return phrases.filter(
+      (p) => p.title.toLowerCase().includes(q) || p.text.toLowerCase().includes(q)
+    );
+  }, [phrases, phraseQuery]);
+
+  // 查询变了把高亮拉回第一条，否则会停在一个已不存在的下标上。
+  useEffect(() => {
+    setPhraseIndex(0);
+  }, [phraseQuery]);
+
+  // 高亮项必须滚进可视区，否则键盘选到列表外时用户看不见。
+  useEffect(() => {
+    if (snap.state !== 'phrases') return;
+    const el = listRef.current?.querySelectorAll('[data-testid="phrase-item"]')[phraseIndex];
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [phraseIndex, filteredPhrases.length, snap.state]);
+
+  /**
+   * 选中一条：把正文交给编辑区（phraseText），记一次「被用过」，再让状态机切
+   * reviewing。phrasesTouch **不 await** —— 它只影响下次排序，不该拖慢或挡住进态。
+   */
+  const selectPhrase = useCallback(
+    (p: PhraseRow) => {
+      setPhraseText(p.text);
+      void vp.phrasesTouch(p.id);
+      void vp.usePhrase();
+    },
+    [vp]
+  );
+
+  const onSearchKey = useCallback(
+    (e: ReactKeyboardEvent<HTMLInputElement>) => {
+      const list = filteredPhrases;
+      if (e.key === 'ArrowDown') {
+        // 必须 preventDefault：否则按键会带着窗口滚动
+        e.preventDefault();
+        setPhraseIndex((i) => Math.min(i + 1, Math.max(list.length - 1, 0)));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setPhraseIndex((i) => Math.max(i - 1, 0));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const p = list[phraseIndex];
+        if (p) selectPhrase(p);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        void vp.togglePhrases();
+      }
+    },
+    [filteredPhrases, phraseIndex, selectPhrase, vp]
+  );
 
   // 内容变多/变少时，按需请求主进程调整悬浮条窗口高度（向上生长，有上限）。
   // 按「非内容区占用 + 内容需求」来算：chrome 是除内容元素外的所有行（头、
@@ -426,8 +522,8 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     const root = barRef.current;
     if (!root) return;
 
-    // 内容元素：reviewing 是编辑区，其余态是只读文本区。
-    const contentEl = editorRef.current ?? textRef.current;
+    // 内容元素：reviewing 是编辑区，phrases 是列表，其余态是只读文本区。
+    const contentEl = editorRef.current ?? listRef.current ?? textRef.current;
     const isEditor = !!editorRef.current;
     // 非内容区占用 = 根的可滚动内容高 - 内容元素高。
     // 用 scrollHeight 而不是 clientHeight：内容元素被压到 0（新增的行把空间吃满）时，
@@ -450,6 +546,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   }, [
     draft, committed, snap, error, copied, hint, edited,
     polishOut, polishing, polishError, vp,
+    phraseQuery, phraseIndex, filteredPhrases.length,
   ]);
 
   const paragraphs = useMemo(() => {
@@ -636,8 +733,42 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
       {error && <div style={styles.error}>{ERROR_TEXT[error.kind] ?? error.message}</div>}
 
-      {/* reviewing 是可编辑面：textarea 是唯一真源；其余态保持只读展示（A2） */}
-      {snap.state === 'reviewing' ? (
+      {/* phrases：常用语选择器（可聚焦、键盘驱动）；reviewing：可编辑面；
+          其余态：只读展示（A2） */}
+      {snap.state === 'phrases' ? (
+        <>
+          <input
+            ref={searchRef}
+            data-testid="phrase-search"
+            style={styles.search}
+            value={phraseQuery}
+            onChange={(e) => setPhraseQuery(e.target.value)}
+            onKeyDown={onSearchKey}
+            placeholder={t('bar.phrases.searchPlaceholder')}
+          />
+          <div ref={listRef} data-testid="phrase-list" style={styles.list}>
+            {filteredPhrases.length === 0 ? (
+              <div data-testid="phrases-empty" style={styles.listEmpty}>
+                {phrases.length === 0 ? t('bar.phrases.empty') : t('bar.phrases.noMatch')}
+              </div>
+            ) : (
+              filteredPhrases.map((p, i) => (
+                <div
+                  key={p.id}
+                  data-testid="phrase-item"
+                  data-active={i === phraseIndex}
+                  style={styles.listItem(i === phraseIndex)}
+                  onMouseEnter={() => setPhraseIndex(i)}
+                  onClick={() => selectPhrase(p)}
+                >
+                  <div style={styles.listTitle}>{p.title}</div>
+                  <div style={styles.listSnippet}>{p.text.replace(/\s+/g, ' ').slice(0, 60)}</div>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      ) : snap.state === 'reviewing' ? (
         <textarea
           ref={editorRef}
           data-testid="bar-editor"
@@ -810,6 +941,50 @@ const styles = {
     fontFamily: 'inherit' as const,
     userSelect: 'text' as const,
   },
+  search: {
+    flexShrink: 0,
+    padding: '6px 8px',
+    borderRadius: 6,
+    border: '1px solid #d1d5db',
+    background: '#ffffff',
+    color: '#111827',
+    fontFamily: 'inherit' as const,
+    fontSize: 13,
+    outline: 'none',
+    userSelect: 'text' as const,
+  },
+  // 列表自己滚，不参与 flex:1 抢空间 —— 窗口高度有上限（BAR_MAX_HEIGHT），
+  // 条目多时靠 maxHeight + overflow 兜住。
+  list: {
+    flexShrink: 0,
+    maxHeight: 360,
+    overflowY: 'auto' as const,
+    scrollbarWidth: 'thin' as const,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 2,
+  },
+  listItem: (active: boolean) => ({
+    padding: '6px 8px',
+    borderRadius: 6,
+    cursor: 'pointer' as const,
+    background: active ? '#eff6ff' : 'transparent',
+  }),
+  listTitle: {
+    color: '#111827',
+    fontSize: 13,
+    overflow: 'hidden' as const,
+    textOverflow: 'ellipsis' as const,
+    whiteSpace: 'nowrap' as const,
+  },
+  listSnippet: {
+    color: '#9ca3af',
+    fontSize: 11,
+    overflow: 'hidden' as const,
+    textOverflow: 'ellipsis' as const,
+    whiteSpace: 'nowrap' as const,
+  },
+  listEmpty: { color: '#9ca3af', padding: 12, textAlign: 'center' as const },
   // 润色结果下半区：与 editor 同款边框/内边距，但底色略深以示「不是可编辑的原文」。
   // flex:'0 0 auto' —— 编辑区仍是 flex:1 的主角，结果区不参与抢空间，
   // 长结果靠自己的 overflowY 滚动。
@@ -870,4 +1045,4 @@ const styles = {
     lineHeight: 0,
   },
   hint: { color: '#6b7280', fontSize: 11, flexShrink: 0 },
-} satisfies Record<string, CSSProperties>;
+} satisfies Record<string, CSSProperties | ((active: boolean) => CSSProperties)>;
