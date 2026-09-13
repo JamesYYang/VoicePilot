@@ -33,29 +33,9 @@ let pendingHistoryId = null;
  */
 const DEBUG_INJECT = process.env.VP_INJECT_DEBUG === '1';
 
-/**
- * 成功写回后、拆悬浮条之前要等多久（毫秒）。
- *
- * **为什么要有这个等待**：渲染层拿到 `vp:adopt/paste` 的结果才会去关悬浮条，而拆条会
- * 动我们自己窗口的状态。这个动作若与「目标应用消费粘贴」重叠，粘贴就会被扰动掉 ——
- * 所以要让它晚于（而不是与）粘贴发生。
- *
- * **250 的来历，以及它现在的可信度**：这个数字来自一次真机实测（Word）：不等 = 0/4
- * 成功，等 200ms = 4/4 成功。但那次测量**早于**「置前前先交出可聚焦性」的修改落地，
- * 而那次修改已经让拆条里的 `setFocusable(false)` 变成空操作。也就是说：现在究竟还有
- * 哪些拆条动作会扰动粘贴（`resetBarHeight` 改窗口尺寸？渲染层卸载？）**尚未重新测量**，
- * 「等待让粘贴真的有机会落地」目前只是**假设**，不是已证实的机制。
- *
- * **想重新测**：用 `VP_ADOPT_SETTLE_MS=0` 跑真机，对比成败，再决定这个值是否还需要。
- * ⚠️ 250 是在 **Windows** 上测的；macOS 一侧完全未验 —— Mac 试用者先试
- * `VP_ADOPT_SETTLE_MS=0` 看是否仍成立。
- *
- * 与仓库里既有的 `VP_*_DEBUG` 一类调试旋钮同一做法。
- */
-function settleMs() {
-  const n = Number(process.env.VP_ADOPT_SETTLE_MS);
-  return Number.isFinite(n) && n >= 0 ? n : 250;
-}
+// 这里**曾经**有一个 settleMs()（成功后等 250ms 再返回，让拆条晚于目标消费粘贴）。
+// 已删除，理由见 vp:adopt/paste 里那段注释：它的依据是一个已被更根本的修法消除的
+// 机制，真机复测（VP_ADOPT_SETTLE_MS=0）4/4 成功，说明它已无存在理由。
 
 export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, resetBarHeight, rebuildTray }) {
   /**
@@ -240,21 +220,22 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
       if (!r?.ok && isBarFocusable(machine.getSnapshot()?.state)) setBarFocusable(true);
     }
 
-    // ⚠️ 成功后**不能立刻返回**：渲染层拿到这个 promise 的结果才会去关悬浮条，
-    // 而拆条动作（尺寸复位、渲染层卸载等）若与「目标应用消费粘贴」重叠，就会把
-    // 激活/粘贴扰动掉。延后返回是为了让拆条**晚于**粘贴发生。
-    //
-    // 真机实测（Word，同一套代码，只差这个等待）：不等 = 0/4 成功；等 200ms = 4/4 成功。
-    // 记事本粘贴极快所以一直能用，Word 的富文本剪贴板慢就赶不上 —— 「时灵时不灵」就是谁先到。
-    //
-    // ⚠️ 那次测量**早于**「置前前先交出可聚焦性」的修改落地，所以当时被当成扰动源的
-    // 拆条 `setFocusable(false)` 如今已是空操作。剩下到底哪个拆条动作在扰动**尚未重测**
-    // —— 「等待 ⇒ 粘贴有机会落地」是**假设**而非已证实的机制。细节与重测方法见
-    // settleMs() 的注释。
-    if (r.ok) await new Promise((res) => setTimeout(res, settleMs()));
+    // 这里**曾经**有一段「成功后先等 250ms 再返回」的延时，用来让拆条晚于目标消费粘贴。
+    // 已删除 —— 因为它的依据是个已被移除的机制：当时测到 0/4 vs 4/4 的对照，早于
+    // 「置前前先交出可聚焦性」落地，而那个改动让拆条时的 `setFocusable` 变成空操作。
+    // 结构上现在两条路径都不再扰动目标：
+    //   · 悬浮条原本可聚焦 → 上面已提前置为不可聚焦 → emit 看到值未变 → 跳过样式变更；
+    //   · 原本就不可聚焦 → emit 同样跳过。
+    // 也就是说「拆条改窗口样式」这件事已经不可能发生，延时无从防起。
+    // 真机复测（Word，`VP_ADOPT_SETTLE_MS=0`）：4/4 成功、光标仍留在目标。
+    // 若将来某台机器又复现「粘贴丢失」，先怀疑拆条里剩下的动作（`resetBarHeight` 的
+    // 尺寸复位、渲染层 unmount），而不是先把这段等待加回来。
 
     if (DEBUG_INJECT) {
-      // 等可能的粘贴落地后再读第二次。此刻编辑区仍在（返回被上面延后了）。
+      // ⚠️ 这段等待**只服务于下面这次读数**，不在产品路径上。
+      // 但看日志时要留意：它同样会把「拆条过早」类的问题掩盖掉 —— 所以它只在
+      // DEBUG 下存在，不能拿 DEBUG 下的成功去证明产品路径没问题。
+      await new Promise((res) => setTimeout(res, 250));
       const after = await probeBar('发键后');
       if (before && after && before.editor !== after.editor) {
         console.warn('[注入] ⚠️ 悬浮条编辑区内容在发键后变了 —— 按键落在了我们自己窗口里');
