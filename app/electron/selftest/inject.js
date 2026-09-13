@@ -1,5 +1,5 @@
 import koffi from 'koffi';
-import { captureTarget, classifyForeground, pasteTo, pasteWith } from '../inject/index.js';
+import { activateWith, captureTarget, classifyForeground, pasteTo, pasteWith } from '../inject/index.js';
 import { INPUT_SIZE, GUITHREADINFO_SIZE } from '../inject/win.js';
 
 /**
@@ -149,6 +149,55 @@ export async function runInjectSelftest() {
   check('activate 抛异常 → send-failed 且**不发键**（不得把异常漏给调用方）',
     rThrow?.reason === 'send-failed' && throwing.calls.send === 0,
     JSON.stringify({ r: rThrow, send: throwing.calls.send }));
+
+  // ---- 只置前（activateWith）：不发键是它的全部意义 ----
+  // 关键手法：假 platform **故意不提供 sendPaste** —— 一旦实现里混进了发键，
+  // 调用会抛 TypeError 并被 activateWith 兜成 activate-failed，这条断言立刻红。
+  const mkActivateOnly = (activateResult) => {
+    const calls = { activate: 0 };
+    return {
+      calls,
+      platform: {
+        activate: async () => {
+          calls.activate += 1;
+          return activateResult;
+        },
+      },
+    };
+  };
+
+  const actOk = mkActivateOnly({ ok: true, id: 1 });
+  const rActOk = await activateWith(actOk.platform, { kind: 'win', hwnd: 1 });
+  check('只置前：确认到前台 → ok，且不需要 sendPaste',
+    rActOk?.ok === true && actOk.calls.activate === 1,
+    JSON.stringify({ r: rActOk, calls: actOk.calls }));
+
+  const actMismatch = mkActivateOnly({ ok: true, id: 2 });
+  const rActMismatch = await activateWith(actMismatch.platform, { kind: 'win', hwnd: 1 });
+  check('只置前：回读不匹配 → activate-failed',
+    rActMismatch?.reason === 'activate-failed', JSON.stringify(rActMismatch));
+
+  const actFail = mkActivateOnly({ ok: false, reason: 'permission' });
+  const rActFail = await activateWith(actFail.platform, { kind: 'win', hwnd: 1 });
+  check('只置前：透传平台 reason',
+    rActFail?.reason === 'permission', JSON.stringify(rActFail));
+
+  const actNull = mkActivateOnly({ ok: true, id: 1 });
+  const rActNull = await activateWith(actNull.platform, null);
+  check('只置前：target 为 null → no-target 且不调 activate',
+    rActNull?.reason === 'no-target' && actNull.calls.activate === 0,
+    JSON.stringify({ r: rActNull, calls: actNull.calls }));
+
+  const actThrows = {
+    platform: {
+      activate: async () => {
+        throw new Error('boom');
+      },
+    },
+  };
+  const rActThrows = await activateWith(actThrows.platform, { kind: 'win', hwnd: 1 });
+  check('只置前：activate 抛异常 → activate-failed（不抛给调用方）',
+    rActThrows?.reason === 'activate-failed', JSON.stringify(rActThrows));
 
   // ---- pasteTo 的入口守卫（真实置前与发键没法自动验）----
   const noTargetMac = await pasteTo(null);

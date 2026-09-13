@@ -64,18 +64,32 @@ export async function pasteWith(platform, target) {
 }
 
 /**
+ * 激活步骤：置前 → 回读确认。**故意不接住异常**。
+ *
+ * 两个调用方对「activate 抛异常」的归因不同，且各自都有断言钉着：
+ *   - 粘贴路径（decidePaste）：抛异常 → `send-failed`（既有断言，见 selftest/inject.js:149）；
+ *   - 只置前路径（activateWith）：抛异常 → `activate-failed`（它根本没有发键这一步）。
+ * 统一在这里吞掉会把前者改坏。
+ */
+async function activateStep(platform, target) {
+  if (!platform || !target) return { ok: false, reason: 'no-target' };
+
+  const a = await platform.activate(target);
+  if (!a?.ok) return { ok: false, reason: a?.reason ?? 'activate-failed' };
+
+  // 平台实现回读到的前台标识。Windows 是 HWND(number)，macOS 是 pid(number)。
+  return classifyForeground(target.hwnd ?? target.pid, a.id);
+}
+
+/**
  * 实际编排。抽成独立函数只是为了让 pasteWith 有**唯一出口**，好在那一处统一打诊断；
  * 逻辑与判定完全在内，未做任何改动。
  */
 async function decidePaste(platform, target) {
-  if (!platform || !target) return { ok: false, reason: 'no-target' };
   try {
-    const a = await platform.activate(target);
-    if (!a?.ok) return { ok: false, reason: a?.reason ?? 'activate-failed' };
-
-    // 平台实现回读到的前台标识。Windows 是 HWND(number)，macOS 是 pid(number)。
-    const cls = classifyForeground(target.hwnd ?? target.pid, a.id);
-    if (!cls.ok) return cls;
+    // 顺序是安全属性：确认为止一次键都不能发（见 spec 2026-09-13 §3）。
+    const act = await activateStep(platform, target);
+    if (!act.ok) return act;
 
     platform.sendPaste();
     return { ok: true };
@@ -83,6 +97,27 @@ async function decidePaste(platform, target) {
     console.warn(`[注入] 粘贴失败：${e?.message ?? e}`);
     return { ok: false, reason: 'send-failed' };
   }
+}
+
+/**
+ * 只置前、不发任何按键。用于「关掉常用语选择器后把焦点还给用户原来的应用」。
+ * 与 pasteTo 共用 activateStep，避免两份激活与确认逻辑漂移。
+ *
+ * 失败一律不抛、只回 reason：调用方（状态机）在关闭路径上不该因为归还焦点失败
+ * 而中断收尾 —— 失败只写日志（spec §6 第 6 条）。
+ */
+export async function activateWith(platform, target) {
+  try {
+    return await activateStep(platform, target);
+  } catch (e) {
+    console.warn(`[注入] 置前失败：${e?.message ?? e}`);
+    return { ok: false, reason: 'activate-failed' };
+  }
+}
+
+/** 把 target 置前。调用方负责不要在这之后发键 —— 本函数只做前置。 */
+export function activateTarget(target) {
+  return activateWith(impl, target);
 }
 
 /**
