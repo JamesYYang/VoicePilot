@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import { useT } from '../i18n';
 
 /**
- * 常用语管理（F14）。与 HistoryView 结构对称，但**不复用它** —— 那边是只读 +
+ * 常用语管理（F16）。与 HistoryView 结构对称，但**不复用它** —— 那边是只读 +
  * 复制/润色，这边是编辑/删除/新建，硬塞会让两边都变形。
  *
  * 详情面板同时承担「新建」：没有选中项时点保存就是新增（同一个 vp.phrasesSave）。

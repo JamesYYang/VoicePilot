@@ -71,6 +71,10 @@
 | `app/package.json` | `dependencies` 增 `koffi`；`build` 配置处理 `.node` 的 asarUnpack 与 macOS arm64 签名 |
 | `app/src/studio/PolishView.tsx` | 若后续要共享润色 UI 再抽组件；当前保持主应用工作区不动 |
 
+**第 6 条反馈（常用语）的落点**
+
+2026-09-13 试用又提了第 6 条——「设置常用语，快捷键唤起后直接选用」——它不属本文件这五条的范围，独立的设计与实现见 `docs/superpowers/specs/2026-09-13-common-phrases-design.md`（编号 F16）。
+
 ## 2. 采纳写入（最重的一块）
 
 > **本批（Plan 2A）只做回退路径。** 已交付的是 §2.3 的失败回退形态：点「采纳」＝ 取「当前有效文本」复制到剪贴板 + 提示「已复制到剪贴板，请手动粘贴（自动写回尚未实现）」，**不关闭悬浮条，也没有任何注入**。

@@ -91,6 +91,8 @@ adopt():
        : setHint(按 reason 分支的文案)；不关闭悬浮条
 ```
 
+**`adoptPolish` 的 `id` 三态**（2026-09-13 实现）：悬浮条一路**总是显式传 `id`**——本条会话的历史 id，当前 reviewing 没有历史行时传 `null`（例如从常用语来的采纳）；Studio 一路**整体省略该字段**，由主进程回落到 `pendingHistoryId`。显式 `null`（不写库）与「省略」（写 Studio 上次打开那条）是两种语义，由 `app/electron/store.js` 的纯函数 `resolvePolishTarget(id, pendingHistoryId)` 实现并配自测钉住。
+
 历史在这一步之前就已经落好了（进 reviewing 时落一次、编辑后更新一次），所以成功分支只剩「关闭悬浮条」这一个动作。
 
 **成功判据 = 「目标窗口确实到了前台」，不是「粘贴被消费了」。**
