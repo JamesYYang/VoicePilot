@@ -64,7 +64,6 @@ export const zhCN = {
   'phrase.title': '标题',
   'phrase.text': '内容',
   'phrase.listEmpty': '还没有常用语',
-  'phrase.selectHint': '选中一条常用语查看或编辑',
   'phrase.save': '保存',
   'phrase.saved': '已保存',
   'phrase.delete': '删除',

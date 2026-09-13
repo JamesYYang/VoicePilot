@@ -1331,6 +1331,31 @@ export async function runUiTest() {
       setContainer.querySelector('[data-testid="settings-shortcut"]') != null,
     JSON.stringify(setContainer.textContent));
 
+  // 上面那条只断言「三个 testid 都在」，抓不住这次重构的要点：两个槽位必须各自读写。
+  // 若 phrases 块的 read 回落成 getShortcut，或 hintKey 返回主块提示，它依然全绿。
+  // 所以这里把两个槽位**各自**渲染出的加速键与提示文案都钉住。
+  const slotText = (id: string) =>
+    setContainer.querySelector(`[data-testid="${id}"]`)?.textContent ?? null;
+  // 提示 <span> 是 block（statusRow 的父节点）的最后一个元素子节点，当前标记没有 testid。
+  const slotHint = (id: string) =>
+    setContainer.querySelector(`[data-testid="${id}"]`)?.parentElement?.parentElement
+      ?.lastElementChild?.textContent ?? null;
+
+  const phrasesAccelShown = await waitFor(
+    () => slotText('settings-phrase-shortcut') === 'Ctrl+Alt+Space'
+  );
+  check('常用语槽位渲染 getPhraseShortcut 的值（不读主槽位）',
+    phrasesAccelShown, JSON.stringify(slotText('settings-phrase-shortcut')));
+  check('主槽位仍渲染自己的值（getShortcut）',
+    slotText('settings-shortcut') === 'Ctrl+Shift+Space',
+    JSON.stringify(slotText('settings-shortcut')));
+
+  const mainHint = slotHint('settings-shortcut');
+  const phrasesHint = slotHint('settings-phrase-shortcut');
+  check('两个槽位的提示文案不同（hintKey 没串槽）',
+    mainHint != null && phrasesHint != null && mainHint !== phrasesHint,
+    JSON.stringify({ main: mainHint, phrases: phrasesHint }));
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
   for (const f of failed) console.log(`  FAIL ${f.name} ${f.detail}`);

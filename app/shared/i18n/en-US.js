@@ -59,7 +59,6 @@ export const enUS = {
   'phrase.title': 'Title',
   'phrase.text': 'Content',
   'phrase.listEmpty': 'No phrases yet',
-  'phrase.selectHint': 'Select a phrase to view or edit',
   'phrase.save': 'Save',
   'phrase.saved': 'Saved',
   'phrase.delete': 'Delete',

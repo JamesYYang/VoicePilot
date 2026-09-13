@@ -60,7 +60,6 @@ export const zhTW = {
   'phrase.title': '標題',
   'phrase.text': '內容',
   'phrase.listEmpty': '還沒有常用語',
-  'phrase.selectHint': '選取一條常用語查看或編輯',
   'phrase.save': '儲存',
   'phrase.saved': '已儲存',
   'phrase.delete': '刪除',
