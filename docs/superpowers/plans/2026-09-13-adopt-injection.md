@@ -1148,7 +1148,13 @@ git commit -m "feat(adopt): 状态机捕获目标窗口 + 采纳写回 IPC 与�
   // 它必须**显式**挂在假 bridge 上 —— `...real` 复制不到 contextBridge 的非枚举属性
   // （见本文件 copy 那段的注释）。缺了它 App 调 vp.adoptPaste() 会抛 TypeError，
   // async 函数静默 reject，表现是「点了采纳毫无反应」。
-  const adoptPasteCtl: { result: { ok: true } | { ok: false; reason: string }; calls: number } = {
+  //
+  // ⚠️ 类型必须**从真桥派生**，不能手写 `{ ok: true } | { ok: false; reason: string }`：
+  // 这个假 bridge 要赋给 `VoicePilotBridge`，而真桥的 adoptPaste() 返回的是**字面量联合**，
+  // 手写的 `reason: string` 会因逆变检查不过而报 TS2322（bridge 与 noPresetBridge 两处都会报）。
+  // 派生出来就是单一真源：主进程改了 reason 取值，这里跟着变。
+  type AdoptPasteResult = Awaited<ReturnType<Window['voicepilot']['adoptPaste']>>;
+  const adoptPasteCtl: { result: AdoptPasteResult; calls: number } = {
     result: { ok: true },
     calls: 0,
   };
