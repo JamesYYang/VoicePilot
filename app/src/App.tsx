@@ -34,6 +34,10 @@ const ERROR_HOLD_MS = 5000;
 /** 悬浮条窗口高度的上下限（与 electron/main.js 的 BAR / BAR_MAX_HEIGHT 对应）。 */
 const BAR_MIN_HEIGHT = 148;
 const BAR_MAX_HEIGHT = 620;
+/** 编辑态编辑区的高度下限：短句时也要给一个舒服的编辑面，不能只剩一行。 */
+const BAR_EDITOR_MIN_HEIGHT = 96;
+/** 根节点上下各 margin:8，scrollHeight/clientHeight 都不含这 16px，须显式补上。 */
+const BAR_MARGINS = 16;
 
 type SessionState = 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing';
 
@@ -390,6 +394,10 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 听写进行中自动滚到底部：这是「实时跟随」的展示，永远该看到最新那句。
   // 停止（reviewing）后不自动滚，让用户自由回翻查看。
   const textRef = useRef<HTMLDivElement | HTMLTextAreaElement>(null);
+  // 根节点与编辑区：高度 effect 要用「非内容区占用 + 内容需求」来算窗口高度，
+  // 非内容区占用 = root.clientHeight - contentEl.clientHeight。
+  const barRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (snap.state !== 'listening' && snap.state !== 'draining') return;
     const el = textRef.current;
@@ -397,35 +405,40 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   }, [draft, committed, snap.state]);
 
   // 内容变多/变少时，按需请求主进程调整悬浮条窗口高度（向上生长，有上限）。
-  // 用「文本区溢出量」来算：scrollHeight 是内容自然高度，clientHeight 是当前
-  // 可见高度，两者之差就是还缺多少空间。窗口长高后 clientHeight 跟着变大，
-  // 差值归零即收敛；文字删短后差值为负，窗口自动缩回下限。
+  // 按「非内容区占用 + 内容需求」来算：chrome 是除内容元素外的所有行（头、
+  // 场景/语气行、按钮行、提示、润色面板）占的高度，其余行都是 flexShrink:0，
+  // 窗口变高时这一差值不变，所以算一遍就收敛，不会来回抖。内容元素在 reviewing
+  // 是编辑区（给一个舒适下限），其余态是只读文本区。旧的「文本区溢出量」模型在
+  // 短句时溢出为负、窗口不生长，编辑区被其余行挤成一行高 —— 故废弃。
   useEffect(() => {
-    // warming 期间不做测量：上一段会话的定稿文本虽已在 idle→warming 的复位
-    // effect 里被清空，但那只是入队状态更新、这一帧尚未重渲染，textRef 仍指向
-    // 上一段的文本。此时测量会把上一段的高内容算成溢出量，向刚被主进程
-    // resetBarHeight 收回基础高度的窗口再发一次长高请求，复位竞态由此而来。
-    // warming 本就没有内容可量，主进程也已把窗口设成基础高度；直接跳过。
-    // 下次状态变化（listening/draining/reviewing）会重跑本 effect，不会卡在错误高度。
+    // warming 期间不测：文本刚复位，这一帧量到的是上一轮的残留内容，
+    // 会把刚被主进程收回基线高度的窗口重新撑高（见 resetBarHeight）。
     if (snap.state === 'warming') return;
-    const el = textRef.current;
-    if (!el) return;
-    const overflow = el.scrollHeight - el.clientHeight;
+    const root = barRef.current;
+    if (!root) return;
+
+    // 内容元素：reviewing 是编辑区，其余态是只读文本区。
+    const contentEl = editorRef.current ?? textRef.current;
+    // 非内容区占用 = 根内容高 - 内容元素高。其余行都是 flexShrink:0，
+    // 窗口变高时这一差值不变，所以算一遍就能收敛。
+    const chrome = root.clientHeight - (contentEl?.clientHeight ?? 0);
+    // 编辑区要保住一个舒服的下限，否则短句时只剩一行高。
+    const contentNeed = contentEl
+      ? Math.max(contentEl.scrollHeight, editorRef.current ? BAR_EDITOR_MIN_HEIGHT : 0)
+      : 0;
+
     const target = Math.min(
-      Math.max(window.innerHeight + overflow, BAR_MIN_HEIGHT),
+      Math.max(chrome + contentNeed + BAR_MARGINS, BAR_MIN_HEIGHT),
       BAR_MAX_HEIGHT
     );
     const rounded = Math.round(target);
     if (rounded === lastHeightRef.current) return;
     lastHeightRef.current = rounded;
     vp.resizeBar(rounded);
-    // polishOut/polishing/polishError 必须在依赖里：润色面板的出现会挤压编辑区
-    // （编辑区 flex:1、minHeight:0，是唯一能让步的元素），不重新测量的话窗口
-    // 停在 148px 下限，编辑区被压到几乎为零、按钮行被裁。加入这三个后，面板
-    // 一出现就重新按溢出量向上长窗（仍受 BAR_MAX_HEIGHT 夹紧）——窗口长高 →
-    // clientHeight 变大 → overflow 变小即收敛；lastHeightRef 去重，且本组件
-    // 不监听 window resize，不会来回抖。
-  }, [draft, committed, snap, error, copied, edited, polishOut, polishing, polishError, vp]);
+  }, [
+    draft, committed, snap, error, copied, hint, edited,
+    polishOut, polishing, polishError, vp,
+  ]);
 
   const paragraphs = useMemo(() => {
     // 按 paraBreak 分组，渲染成段落。
@@ -541,6 +554,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
   return (
     <div
+      ref={barRef}
       data-state={snap.state}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
@@ -593,7 +607,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       {/* reviewing 是可编辑面：textarea 是唯一真源；其余态保持只读展示（A2） */}
       {snap.state === 'reviewing' ? (
         <textarea
-          ref={textRef as Ref<HTMLTextAreaElement>}
+          ref={editorRef}
           data-testid="bar-editor"
           style={styles.editor}
           value={edited}
