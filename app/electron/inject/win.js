@@ -14,6 +14,42 @@ const KEYEVENTF_KEYUP = 0x0002;
 // 置前是异步的：SetForegroundWindow 返回时目标未必已经真的拿到前台。
 // 60ms 是起点不是承诺（spec §8 第 7 条），真机不合就在 Task 8 调。
 const ACTIVATE_WAIT_MS = 60;
+// 等待期间的探测间隔（仅诊断用，不参与判定）。
+const PROBE_INTERVAL_MS = 10;
+
+/**
+ * 诊断开关。这条路径**没法自动测**（真实置前/粘贴），所以真机排障时唯一的
+ * 信息来源就是它。用 `VP_INJECT_DEBUG=1` 打开，做法与仓库里既有的
+ * `VP_ASR_DEBUG` / `VP_OPEN_DIAG` 一致。
+ */
+const DEBUG = process.env.VP_INJECT_DEBUG === '1';
+
+/** 等待上限（毫秒）。`VP_INJECT_WAIT_MS=<n>` 可在不重新打包的前提下试不同值。 */
+function waitMs() {
+  const n = Number(process.env.VP_INJECT_WAIT_MS);
+  return Number.isFinite(n) && n >= 0 ? n : ACTIVATE_WAIT_MS;
+}
+
+function dbg(...args) {
+  if (DEBUG) console.log('[注入]', ...args);
+}
+
+/**
+ * GUITHREADINFO：只读某线程的焦点窗口。字段顺序/对齐必须与 Win32 一致，
+ * x64 下 sizeof 应为 **72**（已在真机确认）。
+ */
+const RECT = koffi.struct('RECT', { left: 'int32', top: 'int32', right: 'int32', bottom: 'int32' });
+const GUITHREADINFO = koffi.struct('GUITHREADINFO', {
+  cbSize: 'uint32',
+  flags: 'uint32',
+  hwndActive: 'uintptr_t',
+  hwndFocus: 'uintptr_t',
+  hwndCapture: 'uintptr_t',
+  hwndMenuOwner: 'uintptr_t',
+  hwndMoveSize: 'uintptr_t',
+  hwndCaret: 'uintptr_t',
+  rcCaret: RECT,
+});
 
 let api = null;
 
@@ -33,6 +69,12 @@ function lib() {
     GetWindowThreadProcessId: user32.func(
       'uint32 GetWindowThreadProcessId(uintptr_t hWnd, _Out_ uint32* lpdwProcessId)'
     ),
+    // 只读地查某个**线程**的焦点窗口。用它而不是 AttachThreadInput + GetFocus：
+    // 后者会合并两个线程的输入队列，而它本身就是绕过前台锁的标准手法 ——
+    // 拿它在旁边探测会改变被测行为（观测者效应），读到的结论不可信。
+    GetGUIThreadInfo: user32.func('bool GetGUIThreadInfo(uint32 tid, _Inout_ GUITHREADINFO* info)'),
+    GetClassNameW: user32.func('int GetClassNameW(uintptr_t hWnd, void* buf, int max)'),
+    GetWindowTextW: user32.func('int GetWindowTextW(uintptr_t hWnd, void* buf, int max)'),
     GetCurrentThreadId: kernel32.func('uint32 GetCurrentThreadId()'),
     AttachThreadInput: user32.func(
       'bool AttachThreadInput(uint32 idAttach, uint32 idAttachTo, bool fAttach)'
@@ -63,6 +105,45 @@ function readForeground() {
 }
 
 /**
+ * 只读地取某个线程此刻的焦点窗口（不改变任何输入状态）。
+ *
+ * 用 GetGUIThreadInfo 而不是 AttachThreadInput + GetFocus：后者会把两个线程的输入
+ * 队列合并，而 AttachThreadInput 本身就是绕过前台锁的标准手法 —— 拿它在旁边反复
+ * 探测会改变被测行为，读到的结论不可信（这条是踩过坑的）。
+ *
+ * ⚠️ 纯粹诊断用，**不参与判定**：判定仍只看「回读前台窗口 == 目标」（spec §3）。
+ * 之所以值得记下来，是因为「前台到了但焦点没到」正是真机上「报成功却什么都没插进去」
+ * 的嫌疑机制 —— keybd_event 的按键投给的是**焦点**窗口，不是前台窗口。
+ */
+function readFocusOfThread(tid) {
+  if (!tid) return null;
+  const info = {
+    cbSize: koffi.sizeof(GUITHREADINFO),
+    flags: 0,
+    hwndActive: 0,
+    hwndFocus: 0,
+    hwndCapture: 0,
+    hwndMenuOwner: 0,
+    hwndMoveSize: 0,
+    hwndCaret: 0,
+    rcCaret: { left: 0, top: 0, right: 0, bottom: 0 },
+  };
+  return lib().GetGUIThreadInfo(tid, info) ? info : null;
+}
+
+/** 诊断用：读窗口的类名与标题，用来认出「捕获到的目标到底是谁」。内部用，不导出。 */
+function describeWindow(hwnd) {
+  if (!hwnd) return '(null)';
+  const a = lib();
+  const cls = Buffer.alloc(512);
+  const title = Buffer.alloc(1024);
+  a.GetClassNameW(hwnd, cls, 256);
+  a.GetWindowTextW(hwnd, title, 512);
+  const cut = (b) => b.toString('utf16le').replace(/\0.*$/, '');
+  return `${cut(cls)}" ${cut(title) ? `"${cut(title)}"` : ''}`.trim();
+}
+
+/**
  * 发一次 Ctrl+V。**由 index.js 在确认目标窗口已到前台之后调用**（见 Step 2）。
  * keybd_event 返回 void，所以只能靠「有没有抛」判断失败。
  *
@@ -72,6 +153,16 @@ function readForeground() {
  */
 export function sendPaste() {
   const a = lib();
+  // 发键这一刻的边界读数：前台是谁、**焦点**在谁手里。这是整条链最关键的一行 ——
+  // 若焦点不在目标上，这串按键就会被别的窗口吃掉，而调用方仍会判定成功。
+  if (DEBUG) {
+    const fg = readForeground();
+    const foc = readFocusOfThread(a.GetWindowThreadProcessId(fg, null))?.hwndFocus ?? null;
+    dbg(
+      `发键时: 前台=${fg} 该线程焦点窗口=${foc ?? 'null'}` +
+        (foc ? ` = ${describeWindow(foc)}` : '（无焦点窗口：按键会被丢弃）')
+    );
+  }
   a.keybd_event(VK_CONTROL, 0, 0, 0);
   a.keybd_event(VK_V, 0, 0, 0);
   a.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0);
@@ -114,6 +205,45 @@ export async function activate(target) {
     }
   }
 
-  await sleep(ACTIVATE_WAIT_MS);
-  return { ok: true, id: readForeground() };
+  // 等待 + 诊断探测。**不改变判定**：仍然等满 waitMs，返回的仍是回读到的前台句柄。
+  // 探测要回答的是「前台什么时候到」「目标线程什么时候真的拿到键盘焦点」——
+  // keybd_event 的按键投给**焦点**窗口，二者不同步就是「报成功却没插进去」的机制。
+  const targetTid = a.GetWindowThreadProcessId(hwnd, null);
+  const t0 = Date.now();
+  const wait = waitMs();
+  let fgAt = null;
+  let focusAt = null;
+  let lastFocus = null;
+
+  if (DEBUG) {
+    dbg(`目标窗口 ${hwnd} = ${describeWindow(hwnd)}`);
+    dbg(`置前前: 前台=${readForeground()} 目标线程=${targetTid}`);
+  }
+
+  for (;;) {
+    const el = Date.now() - t0;
+    if (fgAt === null && readForeground() === hwnd) fgAt = el;
+    lastFocus = readFocusOfThread(targetTid)?.hwndFocus ?? null;
+    if (focusAt === null && lastFocus && a.GetWindowThreadProcessId(lastFocus, null) === targetTid) {
+      focusAt = el;
+    }
+    if (el >= wait) break;
+    await sleep(PROBE_INTERVAL_MS);
+  }
+
+  const fg = readForeground();
+  if (DEBUG) {
+    dbg(
+      `前台到位=${fgAt ?? '未到'}ms 焦点到位=${focusAt ?? '未到'}ms 等满=${wait}ms` +
+        ` | 结束时前台=${fg}(${fg === hwnd ? '==目标' : '≠目标'}) 目标线程焦点窗口=${lastFocus ?? 'null'}`
+    );
+    if (lastFocus) dbg(`焦点窗口 ${lastFocus} = ${describeWindow(lastFocus)}`);
+  }
+  if (focusAt === null) {
+    console.warn(
+      `[注入] ⚠️ 目标窗口拿到了前台，但目标线程在 ${wait}ms 内**没有拿到键盘焦点**：` +
+        `此时发键会落到仍持有焦点的窗口里（很可能就是我们自己）→ 文本不会进入目标。`
+    );
+  }
+  return { ok: true, id: fg };
 }

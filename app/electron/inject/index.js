@@ -44,6 +44,19 @@ export function captureTarget() {
  * 就被粘进了无关的应用。真机验一次不能防回归，必须是可自动跑的断言。
  */
 export async function pasteWith(platform, target) {
+  const result = await decidePaste(platform, target);
+  // 唯一出口处统一打一行：真机排障时「到底走到哪个分支」是最先要看的东西。
+  if (process.env.VP_INJECT_DEBUG === '1') {
+    console.log(`[注入] 编排结果: ${result.ok ? 'ok' : `失败 reason=${result.reason}`}`);
+  }
+  return result;
+}
+
+/**
+ * 实际编排。抽成独立函数只是为了让 pasteWith 有**唯一出口**，好在那一处统一打诊断；
+ * 逻辑与判定完全在内，未做任何改动。
+ */
+async function decidePaste(platform, target) {
   if (!platform || !target) return { ok: false, reason: 'no-target' };
   try {
     const a = await platform.activate(target);
