@@ -442,6 +442,15 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     setPhraseIndex(0);
     void vp.phrasesList().then(setPhrases).catch(() => setPhrases([]));
     searchRef.current?.focus();
+    // 进选择器就把上一段听写残留的历史 id 清掉：常用语一路不落历史，若留着旧 id，
+    // 「选一条 → 润色 → 采纳」会把润色结果写进上一条无关记录（主进程按显式 id 落库，
+    // 不会替我们判断这条 id 属不属于本次）。
+    // 不能改在 idle 里清：close()/adopt()/copy() 先 persistEdited() 再 vp.toggle() 且不 await，
+    // 在 idle 清会与那笔进行中的回写赛跑，把用户的编辑静默丢掉。进 phrases 一定是从
+    // idle 来的，不会落在听写流程中间，所以在这里清是安全的。
+    historySavedRef.current = false;
+    historyIdRef.current = null;
+    historySaveRef.current = null;
   }, [snap.state, vp]);
 
   // 回 idle 清掉选中态，避免下一轮选择器带着上一条的正文。

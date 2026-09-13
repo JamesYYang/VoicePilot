@@ -1031,8 +1031,10 @@ export async function runUiTest() {
     npContainer.querySelector('[data-testid="bar-polish-output"]') == null);
 
   // ---- 25. 常用语选择器：搜索 / 键盘导航 / Enter 选中 / Esc 关闭 / 占位 ----
-  // 不能用 enterReviewing()：那条路会经过 warming 并把文本灌成 fullText。
-  // 常用语一路是 idle → phrases，正文完全来自 phraseText。
+  // 常用语一路是 idle → phrases，正文完全来自 phraseText，**不能**在进 phrases 之前
+  // 经过 warming —— warming 复位块会清空 committed，历史 effect 就会在 fullText 为空
+  // 的早退处返回，origin 门禁再也测不出来。下面先用 enterReviewing() 造出一段真实
+  // 听写（committed 非空、历史已保存一次）作为判别前提，再从 idle 直接进 phrases。
   phraseRows = [
     { id: 1, title: '问候', text: '您好，收到您的反馈，我先看一下。', created_at: 2, updated_at: 2, used_at: null },
     { id: 2, title: '收尾', text: '有问题随时找我。', created_at: 1, updated_at: 1, used_at: null },
@@ -1047,20 +1049,25 @@ export async function runUiTest() {
   const items = () => Array.from(container.querySelectorAll('[data-testid="phrase-item"]'));
   const activeIndex = () => items().findIndex((n) => n.getAttribute('data-active') === 'true');
 
-  // 先走一次 idle → warming → idle：真实里上一段听写结束后，常用语是从一个干净的
-  // idle 进来的。warming 会把 historyIdRef / committed / draft / polishOut 一并复位 ——
-  // 下面「编辑区不是空的 fullText」与「采纳携带显式 null id」两条断言都以此为前提，
-  // 少了这一趟它们会落在上一段听写残留的会话状态上（id 非 null、fullText 非空）。
-  // failCapture 也要复位：第 8 段把它置成 true 后一直没清，采集起点会直接抛错，
-  // 那样「phrases 态不启动采集」就永远绿，测不出任何回归。
+  // 先把「一次正常听写」走到 reviewing：committed 非空、历史真的保存过一次。
+  // 这是下面「常用语不落历史」能真正判别的前提 —— 旧版先跑 idle → warming → idle，
+  // warming 复位块会把 committed 清空，历史 effect 在 `fullText.trim().length === 0`
+  // 的早退处就返回了，删掉 origin 门禁也照样绿，那条断言等于没写。
+  // 这条听写断言同时是「机制本身没坏」的对照（control）。
+  // failCapture 必须复位：第 8 段把它置成 true 后一直没清，采集起点会直接抛错，
+  // 混进 enterReviewing 的 warming 会把整段带偏。
   failCapture = false;
-  fire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
-  await flush();
-  fire('state', { state: 'warming', notice: null, truncated: false, origin: 'dictation' });
-  await flush();
-  fire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
-  await flush();
+  await enterReviewing();
+  check('听写来的 reviewing 照旧落历史（origin=dictation）',
+    historySaveCtl.payload != null &&
+      (historySaveCtl.payload as { text: string }).text.includes('今天我们要讨论三件事'),
+    JSON.stringify(historySaveCtl.payload));
+  // 前提已坐实，从这里起只盯「常用语这条路有没有再写一次历史」。
+  historySaveCtl.payload = null;
 
+  // 进 phrases **不经过 warming**（enterPhrases 只 fire idle → phrases）：真实里上一段
+  // 听写结束后，常用语就是从 idle 直接进来的，committed 仍留着上一段听写的文本 ——
+  // 正是「fullText 非空」的真实形态，origin 门禁在这条路上才承重。
   await enterPhrases();
   // 「phrases 态绝不启动采集」（spec §1.6）：清掉标志位再进一次态，断言它保持 false。
   // 这是「不说话直接选一条」不产生任何识别费用的唯一证据。
@@ -1124,16 +1131,16 @@ export async function runUiTest() {
     phraseEditor()?.value === '您好，收到您的反馈，我先看一下。',
     JSON.stringify(phraseEditor()?.value));
 
-  // 「常用语不落历史」：origin=phrase 时**不得**调 historySave。
-  historySaveCtl.payload = null;
-  await flush();
-  check('常用语来的 reviewing 不落历史（origin=phrase）',
+  // 「常用语不落历史」（spec §2.3）：origin=phrase 且 fullText 非空（上一段听写的
+  // committed 还在）时**不得**再调 historySave。payload 的基线已在进 phrases 前清零，
+  // 这里若删掉 origin 门禁，历史 effect 会真的写一次，这条必红。
+  check('常用语来的 reviewing 不落新历史（origin=phrase，fullText 非空）',
     historySaveCtl.payload === null, JSON.stringify(historySaveCtl.payload));
 
   // Task 1 遗留：钉住 store.js 的 resolvePolishTarget 三态契约 ——
   // **显式 id=null**（＝本次没有历史行，主进程不回落 pendingHistoryId）与
   // 整个 id 字段缺省（＝Studio 一路，回落）是两种语义，必须能从载荷上区分开。
-  // 常用语一路不写历史，historyIdRef 停在 warming 复位后的 null，正是这条路径。
+  // 常用语一路不写历史，historyIdRef 由 phrases 入口复位为 null，正是这条路径。
   // 要先有润色结果 adopt 才会走回写分支，所以先点润色、再灌一段 delta。
   clickButton('润色');
   await flush();
@@ -1148,13 +1155,6 @@ export async function runUiTest() {
     phraseAdopted != null && 'id' in phraseAdopted && phraseAdopted.id === null,
     JSON.stringify(phraseAdopted));
   await flush();
-
-  // 对照：听写来的 reviewing 必须落历史（否则上面那条可能只是因为 effect 没跑）
-  await enterReviewing();
-  check('听写来的 reviewing 照旧落历史（origin=dictation）',
-    historySaveCtl.payload != null &&
-      (historySaveCtl.payload as { text: string }).text.includes('今天我们要讨论三件事'),
-    JSON.stringify(historySaveCtl.payload));
 
   // Esc 关闭选择器
   await enterPhrases();
