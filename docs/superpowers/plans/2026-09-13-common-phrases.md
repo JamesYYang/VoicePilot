@@ -2100,7 +2100,7 @@ import type { CSSProperties } from 'react';
 import { useT } from '../i18n';
 
 /**
- * 常用语管理（F14）。与 HistoryView 结构对称，但**不复用它** —— 那边是只读 +
+ * 常用语管理（F16）。与 HistoryView 结构对称，但**不复用它** —— 那边是只读 +
  * 复制/润色，这边是编辑/删除/新建，硬塞会让两边都变形。
  *
  * 详情面板同时承担「新建」：没有选中项时点保存就是新增（同一个 vp.phrasesSave）。
@@ -2626,7 +2626,7 @@ git commit -m "feat(phrases): Studio 常用语管理页 + 设置页第二快捷�
 
 - [ ] **Step 2: 同步 PRD**
 
-`docs/plans/2026-09-05-voicepilot-prd.md`：按该文件既有 F 编号体例新增 F14「常用语」，包含：第二个全局快捷键（Win `Ctrl+Alt+Space` / Mac `Alt+Shift+Space`，可改）、选择器交互（搜索 / ↑↓ / Enter / Esc）、与场景语气不绑定、采纳路径复用 F5、管理入口在 Studio。**只写已交付的行为**。
+`docs/plans/2026-09-05-voicepilot-prd.md`：按该文件既有 F 编号体例新增 **F16**「常用语」（**F14/F15 已被「翻译」「导出 PDF」占用，不要用 F14**），包含：第二个全局快捷键（Win `Ctrl+Alt+Space` / Mac `Alt+Shift+Space`，可改）、选择器交互（搜索 / ↑↓ / Enter / Esc）、与场景语气不绑定、采纳路径复用 F5、管理入口在 Studio。**只写已交付的行为**。
 
 - [ ] **Step 3: 同步 README**
 
@@ -2640,7 +2640,7 @@ git commit -m "feat(phrases): Studio 常用语管理页 + 设置页第二快捷�
 
 ```bash
 git add docs/common-phrases-test-runbook.md docs/plans/2026-09-05-voicepilot-prd.md README.md docs/superpowers/specs/2026-09-13-common-phrases-design.md
-git commit -m "docs(phrases): 真机验证清单 + PRD F14 / README 同步"
+git commit -m "docs(phrases): 真机验证清单 + PRD F16 / README 同步"
 ```
 
 ---

@@ -335,7 +335,7 @@ settings.phraseShortcut.hint    '按下组合键即可修改唤起常用语的�
 | 文档 | 改动 |
 |---|---|
 | 本文件 | 新增 |
-| `docs/plans/2026-09-05-voicepilot-prd.md` | 待实现落地后再改（描述的是已交付行为，提前改会骗人）：新增 F14「常用语」条目与第二个全局快捷键 |
+| `docs/plans/2026-09-05-voicepilot-prd.md` | 待实现落地后再改（描述的是已交付行为，提前改会骗人）：新增 **F16**「常用语」条目与第二个全局快捷键。**注意 F14/F15 已被「翻译」「导出 PDF」占用**，不要回头去用 F14 |
 | `README.md` | 同上，落地后同步 |
 | `docs/superpowers/specs/2026-09-12-trial-feedback-design.md` | 落地后在 §1 补第 6 条反馈的落点指针，指向本文件 |
 | `docs/superpowers/specs/2026-09-13-adopt-injection-design.md` | 新增 §2.5 的修复会改动它 §3 的 `adoptPolish` 调用形态（新增显式 `null` 语义），落地时同步 |
