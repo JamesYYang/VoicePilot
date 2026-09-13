@@ -138,8 +138,10 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
    */
   ipcMain.handle('vp:adopt/paste', async () => {
     // 诊断：读**悬浮条自己**的 DOM 状态。这是「按键到底投给了谁」最直接的证据 ——
-    // 若发键那一刻悬浮条的文档仍持有焦点，按键就是投给了我们自己（而 Win32 的
-    // GetForegroundWindow / GetGUIThreadInfo 都会说目标应用才是前台+焦点，测不到这点）。
+    // 若粘进来的文本出现在我们自己的编辑区里，就说明按键落在我们窗口里了。
+    //
+    // ⚠️ 只比 `editor`，**不要**比 hasFocus：目标接管焦点后我们这边 hasFocus 翻成 false
+    // 是**正常**的，拿它做「状态变了」的判据会必然误报（这条踩过）。
     const probeBar = async (tag) => {
       if (!DEBUG_INJECT) return null;
       const bar = getBar();
@@ -156,7 +158,7 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
            })`
         );
         console.log(`[注入] 悬浮条(${tag}): ${s}`);
-        return s;
+        return JSON.parse(s);
       } catch (e) {
         console.log(`[注入] 悬浮条(${tag}) 读取失败: ${e?.message ?? e}`);
         return null;
@@ -166,12 +168,12 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     const before = await probeBar('发键前');
     const r = await pasteTo(machine.getTarget());
     if (DEBUG_INJECT) {
-      // 延后返回，好让可能的粘贴在我们的编辑区里落地后再读一次；
-      // 渲染层要等这个 promise 才关悬浮条，所以此刻编辑区还在。
+      // 等可能的粘贴落地后再读第二次。渲染层要等这个 promise 才关悬浮条，
+      // 所以此刻编辑区仍在。
       await new Promise((res) => setTimeout(res, 200));
       const after = await probeBar('发键后');
-      if (before !== null && after !== null && before !== after) {
-        console.warn('[注入] ⚠️ 悬浮条自身状态在发键后变了 —— 按键很可能落在了我们自己窗口里');
+      if (before && after && before.editor !== after.editor) {
+        console.warn('[注入] ⚠️ 悬浮条编辑区内容在发键后变了 —— 按键落在了我们自己窗口里');
       }
     }
     return r;
