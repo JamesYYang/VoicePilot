@@ -1,4 +1,5 @@
 import koffi from 'koffi';
+import { captureTarget, classifyForeground } from '../inject/index.js';
 
 /**
  * 注入层自测。
@@ -46,6 +47,31 @@ export async function runInjectSelftest() {
   } else {
     check('不支持的平台：跳过平台库加载', true, process.platform);
   }
+
+  // ---- 纯函数：置前判定（真实的置前没法自动验，这里是唯一的自动护栏）----
+  check('目标为 null → no-target',
+    classifyForeground(null, 123)?.reason === 'no-target');
+  check('回读到的前台与目标一致 → ok',
+    classifyForeground(123, 123)?.ok === true);
+  check('回读到的前台与目标不一致 → activate-failed',
+    classifyForeground(123, 456)?.reason === 'activate-failed');
+  check('回读不到前台（null）→ activate-failed，不得当成 ok',
+    classifyForeground(123, null)?.reason === 'activate-failed');
+  check('HWND 按数值比较（不是对象身份）',
+    classifyForeground(9, 9)?.ok === true);
+
+  // ---- 捕获：不抛，且形状正确（拿不到就 null）----
+  let captured = null;
+  let threw = false;
+  try {
+    captured = captureTarget();
+  } catch {
+    threw = true;
+  }
+  check('captureTarget() 不抛', threw === false);
+  check('captureTarget() 返回 null 或 {kind, ...}',
+    captured === null || (captured && typeof captured.kind === 'string'),
+    JSON.stringify(captured));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
