@@ -173,28 +173,18 @@ export class SessionMachine {
 
   /**
    * 关掉选择器：回 idle，并把焦点还给用户原来的应用。
-   * 归还的闸门必须在回 idle **之前**取样 —— 不可聚焦的窗口会立刻失去焦点，
-   * 之后再读闸门只会拿到 false，归还就静默从不发生。
    */
   async #closePhrases() {
-    const target = this.#target;
-    // **闸门必须在 #setState('idle') 之前取样。** 那一步会 setFocusable(false)，
-    // 而不可聚焦的窗口（Windows 上 WS_EX_NOACTIVATE）会立刻被移走焦点 —— 之后再读
-    // isFocused() 永远是 false，表现是「焦点归还静默从不发生」。先取事实，再动窗口状态。
-    const restore = this.#shouldRestoreFocus();
-    this.#target = null;
-    this.#origin = 'dictation';
-    // **顺序是安全属性**：先回 idle，让 emit 里的 setFocusable(false) 与
-    // resetBarHeight() 全部落地，再置前。反过来的话，那两下 frame change / 尺寸
-    // 复位会把刚建立的激活扰动走 —— 这正是 Plan 2B 真机排障的结论（spec §1.4）。
-    this.#setState('idle');
-    if (restore) await this.#restoreFocus(target);
+    // 闸门在这里读（由 #settleToIdle 在动窗口状态之前取样）：只有条确实持有焦点时
+    // 才归还 —— 用户可能在看选择器时点开了别的应用，无条件置前会把他刚切过去的焦点
+    // 硬拽回来（spec §1.4）。
+    await this.#settleToIdle({ gate: () => this.#shouldRestoreFocus() });
     return { ok: true };
   }
 
   /**
    * 把前台还给 target。失败静默（用户按 Esc 就是想走，此刻弹错误是打扰）。
-   * 闸门由**调用方**在动窗口状态之前取样并决定要不要调用本函数（见 #closePhrases）：
+   * 闸门由**调用方**在动窗口状态之前取样并决定要不要调用本函数（见 #settleToIdle）：
    * 不可聚焦的窗口会立刻失去焦点，事后读闸门只会拿到 false。
    */
   async #restoreFocus(target) {
@@ -204,6 +194,47 @@ export class SessionMachine {
       if (!r?.ok) console.warn(`[常用语] 归还焦点失败：${r?.reason ?? 'unknown'}`);
     } catch (e) {
       console.warn(`[常用语] 归还焦点异常：${e?.message ?? e}`);
+    }
+  }
+
+  /**
+   * 回 idle 并（在闸门允许时）把前台还给捕获的目标 —— 关选择器（#closePhrases）与关
+   * 「从常用语来的 reviewing」（#dismiss）共用这一套。两条路径的**顺序都是安全属性**，
+   * 收敛到一处，免得将来只改一条。
+   *
+   * 顺序：先取样闸门 → 清场 → #setState('idle') → 再置前。
+   *
+   * - **闸门必须在 `#setState('idle')` 之前取样。** 那一步会 setFocusable(false)，而
+   *   不可聚焦的窗口（Windows 上 WS_EX_NOACTIVATE）会立刻被移走焦点 —— 之后再读
+   *   isFocused() 永远是 false，表现是「焦点归还静默从不发生」。先取事实，再动窗口状态。
+   * - **置前必须在 `#setState('idle')` 之后。** 那一步会让 emit 里的 setFocusable(false)
+   *   与 resetBarHeight() 全部落地；反过来的话，那两下 frame change / 尺寸复位会把刚建立
+   *   的激活扰动走 —— 这正是 Plan 2B 真机排障的结论（spec §1.4）。
+   *
+   * `gate` 为 null 表示这条路径根本不归还（听写一路的 dismiss），此时不读闸门。
+   */
+  async #settleToIdle({ clearQueue = false, gate = null } = {}) {
+    const target = this.#target;
+    const restore = gate ? this.#readGate(gate) : false;
+    if (clearQueue) this.#queue.clear();
+    this.#target = null;
+    this.#origin = 'dictation';
+    this.#setState('idle');
+    if (restore) await this.#restoreFocus(target);
+  }
+
+  /**
+   * 读焦点闸门，把它变成**非致命**的：生产实现是 getBar()?.isFocused()，窗口已销毁时
+   * 可能抛。若让异常穿出去，#settleToIdle 就会停在 #setState('idle') 之前，状态机永远
+   * 回不到 idle —— 选择器变成 Esc 也关不掉的死局。抛就当「不归还」（fail closed）：
+   * 失败方向是「少还一次焦点」，比「卡死」轻得多。
+   */
+  #readGate(gate) {
+    try {
+      return Boolean(gate());
+    } catch (e) {
+      console.warn(`[常用语] 焦点闸门读取失败，按不归还处理：${e?.message ?? e}`);
+      return false;
     }
   }
 
@@ -346,19 +377,15 @@ export class SessionMachine {
   }
 
   async #dismiss() {
-    const target = this.#target;
     // 只有「从常用语来的 reviewing」需要归还：那条路的焦点是我们主动拿的
     // （见 openPhrases 与 ipc.js 的 focus()）。听写一路的焦点从来不是我们拿的，
     // 且用户可能中途点开了别的应用 —— 无条件置前会把焦点从他刚切过去的地方拽回来。
     const fromPhrase = this.#origin === 'phrase';
-    // 理由同 #closePhrases：闸门必须在 #setState('idle') 之前取样。
-    const restore = fromPhrase && this.#shouldRestoreFocus();
-
-    this.#queue.clear();
-    this.#target = null;
-    this.#origin = 'dictation';
-    this.#setState('idle');
-    if (restore) await this.#restoreFocus(target);
+    // 顺序（含闸门取样时机）与 #closePhrases 完全一致，见 #settleToIdle。
+    await this.#settleToIdle({
+      clearQueue: true,
+      gate: fromPhrase ? () => this.#shouldRestoreFocus() : null,
+    });
   }
 
   // ------------------------------------------------------------ 错误处理

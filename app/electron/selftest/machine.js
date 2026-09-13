@@ -248,9 +248,9 @@ async function testBackpressure() {
 
 // ---------------------------------------------------------------- 入口
 
-/** A2 回归护栏：悬浮条焦点只允许 reviewing 一个状态。 */
+/** A2 回归护栏：悬浮条焦点只允许 reviewing 与 phrases 两个状态。 */
 async function testBarFocusable() {
-  console.log('\n[7] A2：悬浮条仅 reviewing 可聚焦');
+  console.log('\n[7] A2：悬浮条仅 reviewing 与 phrases 可聚焦');
   check('reviewing 可聚焦（编辑区需要键盘输入）', isBarFocusable('reviewing') === true);
   check('idle 不可聚焦', isBarFocusable('idle') === false);
   check('warming 不可聚焦（A2 硬约束）', isBarFocusable('warming') === false);

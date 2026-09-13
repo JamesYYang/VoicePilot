@@ -45,11 +45,13 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
   const emit = (channel, payload) => {
     const bar = getBar();
     if (!bar || bar.isDestroyed()) return;
-    // 只有 reviewing 需要键盘输入（编辑区）。聆听三态必须保持不可聚焦，
-    // 否则「不抢焦点」（A2）就破了 —— 那是这个程序最硬的约束。
+    // reviewing（编辑区）与 phrases（选择器）都需要键盘输入。聆听三态必须保持
+    // 不可聚焦，否则「不抢焦点」（A2）就破了 —— 那是这个程序最硬的约束。
     // 映射抽到 isBarFocusable（session/machine.js）纯粹是为了让它有回归断言：
     // 这行被删掉时，界面自测看不见，只有那边的纯函数断言能拦下来。
-    // 注意这里**不调用 focus()**：切成可聚焦只是允许用户点击进来。
+    // 对绝大多数状态这里只切 focusable、**不调用 focus()**：切成可聚焦只是允许
+    // 用户点击进来。唯一的例外是 phrases —— 选择器的全部价值就是键盘输入，而用户
+    // 是主动按快捷键进来的，所以只有它会调用 focus()（见下方那段）。
     if (channel === 'vp:state') {
       const focusable = isBarFocusable(payload?.state);
       // 只在值真的变化时才切 focusable：setFocusable 会触发 SWP_FRAMECHANGED，
@@ -545,10 +547,21 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     return updatePhrase(n, { title: String(title ?? ''), text: String(text ?? '') });
   });
 
-  ipcMain.handle('vp:phrases/delete', (_e, id) => deletePhrase(Number(id)));
+  ipcMain.handle('vp:phrases/delete', (_e, id) => {
+    // 与 update 同一套 id 校验：非法 id 一律回 false，而不是把它丢给 store 变成
+    // 一次 rejected invoke（渲染进程只按布尔值处理返回）。
+    const n = Number(id);
+    if (!Number.isFinite(n)) return false;
+    return deletePhrase(n);
+  });
 
   /** 被选中一次。渲染进程不 await 它（失败只影响排序）。 */
-  ipcMain.handle('vp:phrases/touch', (_e, id) => touchPhrase(Number(id)));
+  ipcMain.handle('vp:phrases/touch', (_e, id) => {
+    // 同上：非法 id 回 false，不抛。
+    const n = Number(id);
+    if (!Number.isFinite(n)) return false;
+    return touchPhrase(n);
+  });
 
   // ---------------------------------------------------------------- 语言（i18n）
 

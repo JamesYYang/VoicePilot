@@ -1244,6 +1244,24 @@ export async function runUiTest() {
       container.querySelector('[data-testid="bar-editor"]') != null,
     JSON.stringify(container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent));
 
+  // 「有润色存润色」的另一半。上面那条在「无润色结果」下跑：此时 effectiveText 与
+  // 编辑区原文恒等，存的是哪一个都绿，等于没测。这里先制造一段润色结果，再存，
+  // 断言 phrasesSave 收到的是**润色文本**而不是编辑区原文。
+  phraseSaveCtl.payload = null;
+  await enterReviewing();
+  clickButton('润色');
+  await flush();
+  barPolishDelta.cb?.({ text: '润色后的常用语正文' });
+  await flush();
+  // 前提：润色文本确实与编辑区原文不同，否则下面那条断言分辨不出两者。
+  check('有润色结果时编辑区原文与润色文本不同（下一条断言的前提）',
+    barEditor()?.value !== '润色后的常用语正文', JSON.stringify(barEditor()?.value));
+  container.querySelector<HTMLButtonElement>('[data-testid="bar-save-phrase"]')?.click();
+  await waitFor(() => phraseSaveCtl.payload != null);
+  const savedPolished = phraseSaveCtl.payload as { title: string; text: string } | null;
+  check('有润色时存的是润色文本（不是编辑区原文）',
+    savedPolished?.text === '润色后的常用语正文', JSON.stringify(savedPolished));
+
   // derivePhraseTitle 的边界（纯函数，直接验）
   check('derivePhraseTitle：空串 → 空', derivePhraseTitle('') === '', JSON.stringify(derivePhraseTitle('')));
   check('derivePhraseTitle：全空白 → 空',
@@ -1256,6 +1274,11 @@ export async function runUiTest() {
   check('derivePhraseTitle：41 字符截断到 40 并补省略号',
     derivePhraseTitle('a'.repeat(41)) === 'a'.repeat(40) + '…',
     JSON.stringify(derivePhraseTitle('a'.repeat(41))));
+  // 纯 ASCII 用例挡不住「码点截断退回 UTF-16 截断」的回归：'😀' 在 UTF-16 里占
+  // 两个单元，.slice(0,40) 会切出 20 个 emoji 或半个代理对；按码点才是 40 个。
+  check('derivePhraseTitle：按码点截断（emoji 不被 UTF-16 拆开）',
+    derivePhraseTitle('😀'.repeat(41)) === '😀'.repeat(40) + '…',
+    JSON.stringify(derivePhraseTitle('😀'.repeat(41))));
 
   // ---- 27. Studio「常用语」页：列表 / 编辑 / 新建 / 删除 ----
   // 另起一棵树，与第 24 段同款理由：不让上面的容器状态互相干扰。

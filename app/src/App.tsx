@@ -518,6 +518,24 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     [filteredPhrases, phraseIndex, selectPhrase, vp]
   );
 
+  // phrases 态：把 Esc 也挂到 window 上。搜索框进态会自动聚焦，但用户点一下条的
+  // 空白区就会失焦，此后 Esc 再也到不了输入框 —— 而 spec 承诺 Esc 能关掉选择器。
+  // 走**冒泡**阶段（非捕获）：输入框自己的 onKeyDown 先跑并 preventDefault，这里跳过
+  // defaultPrevented 的事件，否则一次按键会触发两次 togglePhrases（关掉又被同一个键
+  // 重新打开，表现成「Esc 没反应」）。再兜一层「事件源就是搜索框」：自测派发的是
+  // 不可取消的合成事件（cancelable:false），那上面 preventDefault 不生效、defaultPrevented
+  // 恒为 false，只靠它会让自测里的 Esc 被处理两次 —— 真实键盘事件可取消，两层都拦得住。
+  useEffect(() => {
+    if (snap.state !== 'phrases') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (e.defaultPrevented || e.target === searchRef.current) return;
+      void vp.togglePhrases();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [snap.state, vp]);
+
   // 内容变多/变少时，按需请求主进程调整悬浮条窗口高度（向上生长，有上限）。
   // 按「非内容区占用 + 内容需求」来算：chrome 是除内容元素外的所有行（头、
   // 场景/语气行、按钮行、提示、润色面板）占的高度，其余行都是 flexShrink:0，

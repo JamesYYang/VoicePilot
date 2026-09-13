@@ -249,7 +249,7 @@ new SessionMachine({
 - 键盘：`↑`/`↓` 移动高亮、`Enter` 选中、`Esc` 关闭。方向键必须 `preventDefault`，否则会带着窗口滚动或移动文本光标。
 - 鼠标：hover 高亮 + 点击选中。既有的 `vp.setMousePassthrough(!hovering)` 逻辑（`app/src/App.tsx:398-400`）直接覆盖，不需要新代码。
 - 高亮项要 `scrollIntoView({ block: 'nearest' })`，否则键盘选到可视区外时用户看不见。
-- 列表项两行：`title` 主行 + 正文首行摘要（次行，截断）。
+- 列表项两行：`title` 主行 + 正文摘要（次行，把**整段正文**压平成一行后截断到前 60 字符，不是只取首行）。
 - 空库 / 无匹配显示占位文案，不显示空列表。
 - 高度走既有的高度 effect（`app/src/App.tsx:409-455`），上限仍是 `BAR_MAX_HEIGHT = 620`（`app/electron/main.js:47`）。`resetBarHeight()` 只在 `idle`/`warming` 触发（`app/electron/ipc.js:68`），关掉选择器回 `idle` 时自然复位。
 - 测试锚点：`data-testid="phrase-search"` / `"phrase-item"` / `"phrases-empty"`。
@@ -286,7 +286,7 @@ reviewing 态**头部行加一个图标按钮**，与「打开应用」并列（
 bar.phrases.searchPlaceholder   '搜索常用语'
 bar.phrases.empty               '还没有常用语。在结果里点书签图标存一条。'
 bar.phrases.noMatch             '没有匹配的常用语'
-bar.phrases.open                '常用语'          (图标 aria-label / title)
+bar.phrases.title               '常用语'          (悬浮条状态徽标；选择器没有单独的开关图标)
 bar.savePhrase                  '存为常用语'       (图标 aria-label / title)
 bar.savedPhrase                 '已存为常用语'
 bar.savePhrase.fail             '没能存进常用语'
@@ -298,6 +298,7 @@ phrase.save                     '保存'
 phrase.saved                    '已保存'
 phrase.delete                   '删除'
 phrase.new                      '新建'
+phrase.untitled                 '未命名'          (Studio 新建时标题留空的占位名)
 settings.phraseShortcut         '常用语快捷键'
 settings.phraseShortcut.hint    '按下组合键即可修改唤起常用语的全局快捷键'
 ```
