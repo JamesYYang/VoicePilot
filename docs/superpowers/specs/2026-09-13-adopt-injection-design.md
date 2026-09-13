@@ -45,7 +45,7 @@
 
 ```ts
 type Target =
-  | { kind: 'win'; hwnd: bigint }
+  | { kind: 'win'; hwnd: number }
   | { kind: 'mac'; pid: number; bundleId: string | null };
 
 type PasteResult =
