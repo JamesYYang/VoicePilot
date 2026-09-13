@@ -199,9 +199,12 @@ adopt():
 ## 8. 待验证 / 实现时定的点
 
 1. **koffi 能否在 Windows 与 macOS（arm64、打包版）加载并调用** —— 实施第一步。
-   **结论（2026-09-13）**：**Windows 开发机已实测**——`koffi@3.2.1` 预编译安装、无编译器步骤；`koffi.load('user32.dll')` 成功；`GetForegroundWindow()` 返回真实 HWND（`uintptr_t` 返回 **`number`**，可直接 `!==` 比较；`void*` 返回 `bigint`）。**macOS（arm64）与两个平台的打包版未验（需 Mac 真机 / 打包产物）**：从未在 macOS 上执行过。验法与判据见 `docs/adopt-injection-test-runbook.md` 用例 7 与用例 1–2。
+   **结论（2026-09-13）**：**Windows 开发机与 Windows 打包版均已实测**——`koffi@3.2.1` 预编译安装、无编译器步骤；`koffi.load('user32.dll')` 成功；`GetForegroundWindow()` 返回真实 HWND（`uintptr_t` 返回 **`number`**，可直接 `!==` 比较；`void*` 返回 `bigint`）。
+   **打包版实测**：`npm run build && npx electron-builder --win --dir` 产出后，直接跑 `release/win-unpacked/VoicePilot.exe` 并带 `VP_INJECT_SELFTEST=1` → **17/17 通过、退出码 0**，其中 `captureTarget()` 在打包版内取到真实 HWND（`{"kind":"win","hwnd":393822}`）。**这证明 `.node` 确实从 asar 外被 dlopen 并调用成功**，不再只是「文件被移出去了」。
+   **仍未验**：macOS（arm64，从未执行过任何一行）、以及两个平台的**真实置前/粘贴**。验法与判据见 `docs/adopt-injection-test-runbook.md` 用例 7 与用例 1–2。
 2. **asarUnpack 是否生效**（smartUnpack 自动处理，还是需要显式配置）。
-   **结论（2026-09-13）**：**已实测（Windows 开发机）**，且**必须显式配**。koffi 3.x 的原生二进制在 `node_modules/@koromix/koffi-<platform>-<arch>/`，**不在** `node_modules/koffi/`，所以只写 `node_modules/koffi/**` 是空操作。已改为 `["node_modules/koffi/**", "node_modules/@koromix/**"]`（`app/package.json`）。A/B 证据：`electron-builder --win --dir` + `-c.asar.smartUnpack=false`，旧 glob 下 `.node` 留在 asar 内（`unpacked=false`），新 glob 下移出（asar 缩小约 1.04 MB，与 `koffi.node` + `koffi.lib` 吻合），产物实测在 `release/win-unpacked/resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node`，1,036,800 B。⚠️ **这只证明文件「移出去了」，不证明应用能「加载它」**——后者属第 1 条的未验部分。
+   **结论（2026-09-13）**：**已实测（Windows 开发机）**，且**必须显式配**。koffi 3.x 的原生二进制在 `node_modules/@koromix/koffi-<platform>-<arch>/`，**不在** `node_modules/koffi/`，所以只写 `node_modules/koffi/**` 是空操作。已改为 `["node_modules/koffi/**", "node_modules/@koromix/**"]`（`app/package.json`）。A/B 证据：`electron-builder --win --dir` + `-c.asar.smartUnpack=false`，旧 glob 下 `.node` 留在 asar 内（`unpacked=false`），新 glob 下移出（asar 缩小约 1.04 MB，与 `koffi.node` + `koffi.lib` 吻合），产物实测在 `release/win-unpacked/resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node`，1,036,800 B。
+   ✅ **「应用能加载它」这一半也已在 Windows 打包版实测通过**（2026-09-13，见第 1 条）：打包版跑 `VP_INJECT_SELFTEST=1` 得 17/17、退出码 0，并在包内取到真实前台 HWND。**macOS arm64 的同一问题仍未验**，见第 3 条。
 3. **macOS arm64 上 `.node` 的 adhoc 签名**是否需要 afterPack 钩子。
    **结论（2026-09-13）**：**未验（需 Mac 真机 + 打包产物）**。当前**没有**加 afterPack 钩子。若打包版启动即报 koffi 加载失败，再加 `codesign -s -`；验法与降级判据见 runbook 用例 7 ②/降级条件。
 4. `SetForegroundWindow` 被前台锁拒绝的实际频率，以及 `AttachThreadInput` 兜底是否够用。

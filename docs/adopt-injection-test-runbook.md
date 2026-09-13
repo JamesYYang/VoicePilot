@@ -18,7 +18,7 @@
 | 自测（主进程注入 17/17、状态机 41/41、界面 88/88、i18n 三语键齐、typecheck 干净） | **已实测（Windows 开发机）** | 只覆盖纯函数 / 编排顺序 / 界面分支，**不含真实置前与粘贴** |
 | **真实置前 + 粘贴（记事本 / 浏览器 / 终端 / Office）** | **未验（Win 与 Mac 都没有）** | 本手册的核心内容 |
 | **整个 macOS 实现**（5 个 `objc_msgSend` 声明、`AXIsProcessTrusted` 符号解析、`frontPid()`、自守、`activateWithOptions:`、`CGEventPost`） | **未验（需 Mac 真机）** | macOS 上从未执行过 |
-| **打包版能否 `dlopen` 外置的 `.node`**（Win / Mac arm64） | **未验** | 上面的 A/B 只证明文件**移动了**，没证明应用能**加载它** |
+| **打包版能否 `dlopen` 外置的 `.node`** | **Windows 已实测；macOS arm64 未验** | Windows：2026-09-13 从 HEAD 重打 `--dir` 包后直接跑 `release/win-unpacked/VoicePilot.exe`（带 `VP_INJECT_SELFTEST=1`）→ **17/17、退出码 0**，包内取到真实前台 HWND `{"kind":"win","hwnd":393822}` ⇒ `.node` 确实从 asar 外被 dlopen 并调用成功（不再只是「文件移动了」）。**macOS 同一问题仍未验**，见用例 7 ② |
 | **A2 回归**（新增 `start()` 时同步捕获后，聆听三态仍不抢焦点） | **未验（真机）** | 界面自测覆盖不到真实焦点 |
 | `SetForegroundWindow` 被前台锁拒绝的频率、`AttachThreadInput` 兜底是否够用 | **未验** | `GetWindowThreadProcessId(hwnd, null)` 只在开发机上探过一次，未抛异常、返回了合理线程 id |
 
