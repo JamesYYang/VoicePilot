@@ -34,7 +34,12 @@ function lib() {
   // activateWithOptions: 的参数是 NSUInteger（64 位）。**必须声明成 64 位**：声明成
   // uint32_t 时 koffi 只写寄存器的低 32 位，高 32 位是什么由 ABI 决定，目标可能读到一个
   // 天文数字的 options。传 number 即可（Task 1 实测 uintptr_t 与 number 互通）。
-  const msgSendVoidUPtr = objc.func('void objc_msgSend(void* receiver, void* selector, uintptr_t arg)');
+  //
+  // 返回类型是 **BOOL**（方法签名 `- (BOOL)activateWithOptions:`），不是 void。
+  // 但**不要使用这个返回值**：macOS 14 起该位（IgnoringOtherApps）已被弃用，实测常见
+  // 「返回 YES 却没真的置前」。本设计的成功判据是**回读前台窗口**那一条（spec §3），
+  // 多一个会骗人的判据只会引入误报。声明成 bool 只是为了让声明与 API 一致。
+  const msgSendBoolUPtr = objc.func('bool objc_msgSend(void* receiver, void* selector, uintptr_t arg)');
 
   // 只为确保 AppKit 已在本进程里加载，否则 objc_getClass('NSWorkspace') 会拿到 null。
   // Electron 是 Cocoa 应用、AppKit 本来就在，这一行是把这层隐含依赖写明白。
@@ -63,7 +68,7 @@ function lib() {
     msgSendI32,
     msgSendCStr,
     msgSendPtrI32,
-    msgSendVoidUPtr,
+    msgSendBoolUPtr,
     CGEventCreateKeyboardEvent,
     CGEventSetFlags,
     CGEventPost,
@@ -159,7 +164,8 @@ export async function activate(target) {
   const app = a.msgSendPtrI32(a.NSRunningApplication, a.sel_runningAppWithPid, target.pid);
   if (!app) return { ok: false, reason: 'stale' };
 
-  a.msgSendVoidUPtr(app, a.sel_activateWithOptions, BOTH_ACTIVATION_OPTIONS);
+  // 返回值故意丢弃：见 lib() 里 msgSendBoolUPtr 的注释（macOS 14+ 上它会骗人）。
+  a.msgSendBoolUPtr(app, a.sel_activateWithOptions, BOTH_ACTIVATION_OPTIONS);
 
   await sleep(ACTIVATE_WAIT_MS);
   return { ok: true, id: frontPid() };

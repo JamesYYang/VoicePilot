@@ -137,20 +137,35 @@ export async function runInjectSelftest() {
   check('pasteTo(null) → no-target', noTargetMac?.reason === 'no-target',
     JSON.stringify(noTargetMac));
 
-  // 形状不对的目标必须被**平台实现自己**挡掉。断言精确到 reason='no-target'：
-  // 只断言 ok===false 是不够的 —— 平台实现若没做 kind 校验，会去解构不存在的 hwnd，
-  // 要么抛（被 index 兜成 'send-failed'）要么把 undefined 当 0（'stale'），两种都会
-  // 让 ok===false 成立，断言就变成了假绿。
-  const wrongKind = await pasteTo({ kind: 'mac', pid: 1, bundleId: null });
-  check('平台不匹配的目标被拒绝，且 reason 精确为 no-target',
-    wrongKind?.reason === 'no-target', JSON.stringify(wrongKind));
+  // ---- mac 形状目标的 kind 守卫：**必须做平台守卫** ----
+  // 这两条验的是 **Windows 平台**的 kind 守卫（win.js 拒掉不属于自己的目标形状）。
+  //
+  // ⚠️ 必须用 win32 守卫，因为这个自测文件本身有 darwin 分支（见上面的
+  // `process.platform === 'darwin'`），所以它会真的在 macOS 上跑。而在 macOS 上 `impl`
+  // 就是 `mac`，`pasteTo({kind:'mac'})` **不会**命中 win.js 的 kind 守卫，而是走到真实的
+  // `mac.activate`：
+  //   - 断言 `reason === 'no-target'` 在 macOS 上必红（mac.activate 走完只会给
+  //     `permission`/`stale`/回读类结果，永远拿不到 `no-target`）；
+  //   - 更糟的是下面用 `pid: process.pid`（我们自己）的那条：若已授权，它会真的激活本应用、
+  //     回读匹配、然后**发出一次真正的 Cmd+V** —— 自测朝当时的前台窗口打按键，
+  //     而且只在副作用发生**之后**才失败。
+  // 在 macOS 上本来就无从验证 Windows 的 kind 守卫，跳过即可。
+  // macOS 侧的真实行为归 Task 8 的真机清单。
+  if (process.platform === 'win32') {
+    // 形状不对的目标必须被**平台实现自己**挡掉。断言精确到 reason='no-target'：
+    // 只断言 ok===false 是不够的 —— 平台实现若没做 kind 校验，会去解构不存在的 hwnd，
+    // 要么抛（被 index 兜成 'send-failed'）要么把 undefined 当 0（'stale'），两种都会
+    // 让 ok===false 成立，断言就变成了假绿。
+    const wrongKind = await pasteTo({ kind: 'mac', pid: 1, bundleId: null });
+    check('平台不匹配的目标被拒绝，且 reason 精确为 no-target',
+      wrongKind?.reason === 'no-target', JSON.stringify(wrongKind));
 
-  // ---- macOS 路径：Windows 上走不到，但可以验它不会被误调用 ----
-  // 这条是防「index.js 的平台分派写反 / 平台实现忘了守 kind」的护栏。
-  // 断言精确到 reason='no-target'（理由同 Task 3 那条：只看 ok===false 会假绿）。
-  const macShaped = await pasteTo({ kind: 'mac', pid: process.pid, bundleId: null });
-  check('Windows 上拒绝 mac 形状的目标，reason 精确为 no-target',
-    macShaped?.reason === 'no-target', JSON.stringify(macShaped));
+    // 这条防「index.js 的平台分派写反 / 平台实现忘了守 kind」。断言同样精确到
+    // reason='no-target'（理由同上）。
+    const macShaped = await pasteTo({ kind: 'mac', pid: process.pid, bundleId: null });
+    check('Windows 上拒绝 mac 形状的目标，reason 精确为 no-target',
+      macShaped?.reason === 'no-target', JSON.stringify(macShaped));
+  }
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
