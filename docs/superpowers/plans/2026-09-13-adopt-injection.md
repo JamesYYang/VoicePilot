@@ -384,7 +384,7 @@ git commit -m "feat(inject): 平台分派 + Windows 捕获前台窗口 + 置前�
 
 - [ ] **Step 1: 扩充 `inject/win.js`**
 
-把 `lib()` 替换为下面这版，并在文件末尾追加 `pasteTo`：
+把 `lib()` 替换为下面这版（补齐其余 user32/kernel32 声明），并在文件末尾追加 **`sendPaste` 与 `activate` 两个函数** —— 不是单个 `pasteTo`（理由见 Step 2）：
 
 ```js
 const SW_RESTORE = 9;
@@ -497,13 +497,6 @@ export async function activate(target) {
 在 `app/electron/inject/index.js` 末尾追加：
 
 ```js
-/**
- * 把剪贴板内容粘贴到 target。**调用方必须先写好剪贴板**（渲染进程经 vp:copy）。
- *
- * 成功判据 = 「目标窗口确实到了前台」。这不是「粘贴被消费了」的判据 ——
- * 后者原理上不可检（发键 API 只报告事件入队，不报告目标应用是否处理）。
- * 管理员权限窗口（Windows UIPI）会因此静默失败，这是 spec §0 已接受的代价。
- */
 /**
  * 编排：切前台 → 回读确认 → **只有确认通过才发键**。
  *
