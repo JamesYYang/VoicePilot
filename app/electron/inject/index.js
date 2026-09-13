@@ -35,3 +35,24 @@ export function captureTarget() {
     return null;
   }
 }
+
+/**
+ * 把剪贴板内容粘贴到 target。**调用方必须先写好剪贴板**（渲染进程经 vp:copy）。
+ *
+ * 成功判据 = 「目标窗口确实到了前台」。这不是「粘贴被消费了」的判据 ——
+ * 后者原理上不可检（发键 API 只报告事件入队，不报告目标应用是否处理）。
+ * 管理员权限窗口（Windows UIPI）会因此静默失败，这是 spec §0 已接受的代价。
+ */
+export async function pasteTo(target) {
+  if (!impl || !target) return { ok: false, reason: 'no-target' };
+  try {
+    const r = await impl.pasteTo(target);
+    if (!r?.ok) return { ok: false, reason: r?.reason ?? 'send-failed' };
+    // 平台实现回读到的前台标识。Windows 是 HWND(number)，macOS 是 pid(number)。
+    const cls = classifyForeground(target.hwnd ?? target.pid, r.id);
+    return cls.ok ? { ok: true } : cls;
+  } catch (e) {
+    console.warn(`[注入] 粘贴失败：${e?.message ?? e}`);
+    return { ok: false, reason: 'send-failed' };
+  }
+}

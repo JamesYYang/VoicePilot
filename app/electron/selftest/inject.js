@@ -1,5 +1,5 @@
 import koffi from 'koffi';
-import { captureTarget, classifyForeground } from '../inject/index.js';
+import { captureTarget, classifyForeground, pasteTo } from '../inject/index.js';
 
 /**
  * 注入层自测。
@@ -72,6 +72,19 @@ export async function runInjectSelftest() {
   check('captureTarget() 返回 null 或 {kind, ...}',
     captured === null || (captured && typeof captured.kind === 'string'),
     JSON.stringify(captured));
+
+  // ---- pasteTo 的入口守卫（真实置前与发键没法自动验）----
+  const noTargetMac = await pasteTo(null);
+  check('pasteTo(null) → no-target', noTargetMac?.reason === 'no-target',
+    JSON.stringify(noTargetMac));
+
+  // 形状不对的目标必须被**平台实现自己**挡掉。断言精确到 reason='no-target'：
+  // 只断言 ok===false 是不够的 —— 平台实现若没做 kind 校验，会去解构不存在的 hwnd，
+  // 要么抛（被 index 兜成 'send-failed'）要么把 undefined 当 0（'stale'），两种都会
+  // 让 ok===false 成立，断言就变成了假绿。
+  const wrongKind = await pasteTo({ kind: 'mac', pid: 1, bundleId: null });
+  check('平台不匹配的目标被拒绝，且 reason 精确为 no-target',
+    wrongKind?.reason === 'no-target', JSON.stringify(wrongKind));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
