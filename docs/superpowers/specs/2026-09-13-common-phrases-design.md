@@ -86,10 +86,13 @@
 **顺序（两条路径相同）：**
 
 ```
+0. 先取样闸门：restore = shouldRestoreFocus()   // 必须在第 1 步之前
 1. #setState('idle')      // emit 同步生效：setFocusable(false) + setSkipTaskbar(true) + resetBarHeight()
 2. this.#target = null
-3. await #activateTarget(target)   // 把前台还给用户原来的应用
+3. if (restore) await #activateTarget(target)   // 把前台还给用户原来的应用
 ```
+
+**第 0 步的位置同样承重。** 闸门读的是 `bar.isFocused()`，而第 1 步的 `setFocusable(false)` 会让窗口**立刻失焦**（Windows 上 WS_EX_NOACTIVATE 的窗口不能被激活，系统会把焦点移走）。放在第 3 步再读，答案永远是 `false` —— 表现是「焦点归还静默从不发生」，而且单测注入的是固定谓词、查不出来。**必须在动窗口状态之前把事实取下来**，之后用取到的布尔值。
 
 **顺序是安全属性，不是风格问题。** 第 1 步必须先做：`setFocusable(false)` 的 frame change 会扰动前台，若先置前再交可聚焦性，激活会被这一下扰动走——这正是 Plan 2B 真机排障确认过的顺序（`app/electron/ipc.js:205` 的「置前目标之前先交出悬浮条的可聚焦性」）。`#setState` 是同步 emit，所以第 1 步返回时可聚焦性已经交出去了。
 
