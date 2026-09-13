@@ -26,7 +26,7 @@ import { applyShortcut, currentAccel, defaultAccel, setShortcutSuspended } from 
 let pendingStudioText = '';
 let pendingHistoryId = null;
 
-export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, rebuildTray }) {
+export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, resetBarHeight, rebuildTray }) {
   /**
    * 主进程 → 渲染进程。
    * 悬浮条可能还没加载完，也可能已被关闭，发送前必须检查。
@@ -41,6 +41,10 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     // 注意这里**不调用 focus()**：切成可聚焦只是允许用户点击进来。
     if (channel === 'vp:state') {
       bar.setFocusable(isBarFocusable(payload?.state));
+      // 会话回到 idle/warming 时把窗口收回基础高度。resizeBar 只增不减，不复位
+      // 就会让下一段空文本继承上一段的高窗（见 main.js resetBarHeight）。listening/
+      // draining 会长文本、reviewing 要放编辑区，都不复位。
+      if (payload?.state === 'idle' || payload?.state === 'warming') resetBarHeight();
     }
     bar.webContents.send(channel, payload);
   };

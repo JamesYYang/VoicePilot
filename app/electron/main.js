@@ -231,6 +231,26 @@ function resizeBar(height) {
 }
 
 /**
+ * 把悬浮条窗口收回基础高度（BAR.height），保持 x 与底边不动。
+ *
+ * resizeBar 只会「按渲染进程报上来的值变」，没有任何路径把它调小 —— 一段长口述
+ * 把窗口顶到 620 后，会话结束、关闭、再触发，窗口仍停在 620（空文本配大窗），
+ * 而渲染侧的高度 effect 又从 window.innerHeight（=620）起算，于是永远回不去。
+ *
+ * 复位必须由主进程做：它是窗口高度的权威。会话回到 idle/warming 时调用（见
+ * ipc.js 的 emit）；listening/draining 会长文本、reviewing 要放编辑区，都不复位。
+ */
+function resetBarHeight() {
+  if (!bar || bar.isDestroyed()) return;
+
+  const b = bar.getBounds();
+  if (Math.abs(b.height - BAR.height) < 1) return; // 已在基础高度，跳过
+
+  const bottom = b.y + b.height; // 与 resizeBar 同款「底边固定」算法
+  bar.setBounds({ x: b.x, y: bottom - BAR.height, width: b.width, height: BAR.height });
+}
+
+/**
  * 加载渲染进程。开发模式可指向 Vite dev server 换取 HMR：
  *   VP_DEV_URL=http://localhost:5173 npm run dev
  */
@@ -427,6 +447,7 @@ app.whenReady().then(async () => {
     requestQuit,
     attachDevLogging,
     resizeBar,
+    resetBarHeight,
     rebuildTray,
   });
 

@@ -104,7 +104,6 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // reviewing 态的可编辑面：edited 是唯一真源（进态时由派生文本灌一次），
   // scenes/tones 来自主进程预设通道，scene/tone 只用于 Task 5 的润色请求。
   const [edited, setEdited] = useState('');
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [scenes, setScenes] = useState<Preset[]>([]);
   const [tones, setTones] = useState<Preset[]>([]);
   const [scene, setScene] = useState<Preset | null>(null);
@@ -132,6 +131,11 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
   const captureRef = useRef<{ start: () => Promise<void>; stop: () => Promise<void> } | null>(null);
   const errorTimerRef = useRef<number | null>(null);
+  // 上一次已请求的窗口高度（去重用）。声明在这里而不是紧挨高度 effect，
+  // 是因为 warming 的复位块也要把它清零：主进程在 idle/warming 已把窗口收回
+  // 基础高度，渲染侧若还记着上一段的高值，高度 effect 会因「没变化」短路，
+  // 再也请求不回一个合身的高度。
+  const lastHeightRef = useRef(0);
 
   /** 出错时展示并停留几秒。悬浮条可能随即回到 idle，不能跟着立刻消失。 */
   const showError = useCallback((e: { kind: string; message: string }) => {
@@ -255,7 +259,6 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       setDraft('');
       setCopied(false);
       setEdited('');
-      setAdvancedOpen(false);
       setHint('');
       // 上一段的润色结果/状态不能带到这一段
       setPolishOut('');
@@ -268,6 +271,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       historySavedRef.current = false;
       historyIdRef.current = null;
       historySaveRef.current = null;
+      // 主进程此刻正把窗口收回基础高度（resetBarHeight），清掉去重值，
+      // 让高度 effect 能在本段内容需要时重新请求一个合身的高度。
+      lastHeightRef.current = 0;
 
       // 「快捷键 → 上屏」的终点是**真的画出来**的那一刻，所以等一帧再回报。
       // performance.timeOrigin + performance.now() 是 epoch 毫秒，
@@ -394,7 +400,6 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 用「文本区溢出量」来算：scrollHeight 是内容自然高度，clientHeight 是当前
   // 可见高度，两者之差就是还缺多少空间。窗口长高后 clientHeight 跟着变大，
   // 差值归零即收敛；文字删短后差值为负，窗口自动缩回下限。
-  const lastHeightRef = useRef(0);
   useEffect(() => {
     const el = textRef.current;
     if (!el) return;
@@ -494,11 +499,12 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   }, [effectiveText, polishOut, persistEdited, scene, tone, vp, t]);
 
   // 悬浮条内润色：把编辑区文本连同场景/语气发给主进程，流式结果落到下半区。
-  // 缺预设时先把折叠区打开（否则按钮点了没反应），让用户先选场景/语气。
+  // 场景/语气常驻在条底，理论上总有值；真拉不到预设时（DB/通道异常）给出明确
+  // 提示而不是静默无反应。
   // setHint('')：一次性提示（「已复制，请手动粘贴」）在用户发起新动作时清掉。
   const runPolish = useCallback(() => {
     if (!scene || !tone) {
-      setAdvancedOpen(true); // 没选预设就把折叠区打开，别让按钮点了没反应
+      setHint(t('bar.err.noPresets'));
       return;
     }
     setPolishOut('');
@@ -542,6 +548,36 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
               ? t('bar.retry', { attempt: snap.notice.attempt, max: snap.notice.maxAttempts })
               : ''}
           </span>
+        )}
+        {/* 「打开应用」只作用于成稿文本，且会把文本交给主应用 —— 聆听三态里
+            点击只会和听写抢场控，所以仅 reviewing 显示。marginLeft:'auto' 把它
+            推到头部右端（头部是 flex 行）。无障碍名只剩 aria-label/title
+            （没有可见文字），两个都要给。 */}
+        {snap.state === 'reviewing' && (
+          <button
+            style={styles.iconButton}
+            data-testid="bar-open-app"
+            title={t('bar.openApp')}
+            aria-label={t('bar.openApp')}
+            onClick={openApp}
+          >
+            {/* 内联 SVG（14×14，无图标库依赖）：圆角矩形 + 从右上角逃逸的箭头 */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="2" y="4" width="8" height="8" rx="1.5" />
+              <path d="M8 2h4v4" />
+              <path d="M12 2 6.5 7.5" />
+            </svg>
+          </button>
         )}
       </div>
 
@@ -613,50 +649,38 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
             >
               {t('bar.adopt')}
             </button>
-            <button style={styles.ghost} data-testid="bar-open-app" onClick={openApp}>
-              {t('bar.openApp')}
-            </button>
             <button style={styles.ghost} onClick={() => void close()}>
               {t('bar.close')}
             </button>
             {snap.truncated && <span style={styles.warn}>{t('bar.truncated')}</span>}
           </div>
+          {/* 场景/语气常驻条底：不再折叠。折叠态在小窗里会被裁掉、点了像没反应，
+              而这两个值决定润色请求，应该一眼可见。仅可选预设，不能在此增改。 */}
           <div style={styles.advanced}>
-            <button
-              style={styles.ghost}
-              data-testid="bar-advanced-toggle"
-              onClick={() => setAdvancedOpen((v) => !v)}
+            <select
+              style={styles.select}
+              data-testid="bar-scene"
+              value={scene?.name ?? ''}
+              onChange={(e) => setScene(scenes.find((p) => p.name === e.target.value) ?? null)}
             >
-              {t('bar.advanced')}
-            </button>
-            {advancedOpen && (
-              <>
-                <select
-                  style={styles.select}
-                  data-testid="bar-scene"
-                  value={scene?.name ?? ''}
-                  onChange={(e) => setScene(scenes.find((p) => p.name === e.target.value) ?? null)}
-                >
-                  {scenes.map((p) => (
-                    <option key={p.id} value={p.name}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  style={styles.select}
-                  data-testid="bar-tone"
-                  value={tone?.name ?? ''}
-                  onChange={(e) => setTone(tones.find((p) => p.name === e.target.value) ?? null)}
-                >
-                  {tones.map((p) => (
-                    <option key={p.id} value={p.name}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
+              {scenes.map((p) => (
+                <option key={p.id} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <select
+              style={styles.select}
+              data-testid="bar-tone"
+              value={tone?.name ?? ''}
+              onChange={(e) => setTone(tones.find((p) => p.name === e.target.value) ?? null)}
+            >
+              {tones.map((p) => (
+                <option key={p.id} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
         </>
       )}
@@ -776,6 +800,21 @@ const styles = {
     color: '#6b7280',
     fontSize: 12,
     cursor: 'pointer' as const,
+  },
+  // 头部右侧的小图标按钮（「打开应用」）。marginLeft:'auto' 在 flex 头部行里
+  // 把它推到最右。lineHeight:0 消掉行内基线带来的多余高度。
+  iconButton: {
+    marginLeft: 'auto',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 4,
+    borderRadius: 6,
+    border: '1px solid #d1d5db',
+    background: 'transparent',
+    color: '#6b7280',
+    cursor: 'pointer' as const,
+    lineHeight: 0,
   },
   hint: { color: '#6b7280', fontSize: 11, flexShrink: 0 },
 } satisfies Record<string, CSSProperties>;

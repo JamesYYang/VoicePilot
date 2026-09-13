@@ -13,7 +13,6 @@ export const zhCN = {
   'bar.copied': '已复制到剪贴板',
   'bar.adopt': '采纳',
   'bar.openApp': '打开应用',
-  'bar.advanced': '润色选项',
   'bar.editPlaceholder': '可直接修改识别结果',
   'bar.adopt.fallback': '已复制到剪贴板，请手动粘贴（自动写回尚未实现）',
   'bar.err.mic': '麦克风不可用，请检查是否被其他程序占用',
@@ -23,6 +22,7 @@ export const zhCN = {
   'bar.err.key': '未获取到授权，请联系管理员',
   'bar.err.asr': '识别服务出错，已保留已识别内容',
   'bar.err.polishStart': '润色请求未发出，请重试',
+  'bar.err.noPresets': '未能加载润色预设，请稍后重试',
   // 主应用导航
   'studio.polish': '润色',
   'studio.history': '历史',

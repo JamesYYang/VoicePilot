@@ -324,6 +324,13 @@ export async function runUiTest() {
     if (!btn) throw new Error(`找不到按钮「${label}」`);
     btn.click();
   };
+  // 「打开应用」现在是无文字的头部图标，按文本点不到，只能按 testid 找。
+  // 每次点击前重新查询，理由同 clickButton（React 重渲染会换 DOM 节点）。
+  const clickTestId = (id: string) => {
+    const btn = container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
+    if (!btn) throw new Error(`找不到 [data-testid="${id}"]`);
+    btn.click();
+  };
 
   clickButton('复制');
 
@@ -349,8 +356,9 @@ export async function runUiTest() {
     JSON.stringify(historySaveCtl.payload));
   toggleCount = 0;
   openStudioCtl.arg = null;
-  // Task 4 起「润色」改为条内润色入口（Task 5 落地），打开主应用改由「打开应用」承担
-  clickButton('打开应用');
+  // Task 4 起「润色」改为条内润色入口（Task 5 落地），打开主应用改由头部的
+  // 「打开应用」图标承担（无文字，只能按 testid 点）。
+  clickTestId('bar-open-app');
   await flush();
   // 显式断言绕开 TS 对对象属性的流收窄（否则被收窄成 never）
   const openedArg = openStudioCtl.arg as string | null;
@@ -726,20 +734,32 @@ export async function runUiTest() {
     barEditor()?.value === '今天我们要讨论三件事\n第一件是采集\n第二件是识别\n第三件是润色',
     JSON.stringify(barEditor()?.value));
 
-  const barButtons = () => Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
-  check('按钮集为 润色/复制/采纳/打开应用/关闭',
-    ['润色', '复制', '采纳', '打开应用', '关闭'].every((l) => barButtons().includes(l)),
-    JSON.stringify(barButtons()));
+  // 「打开应用」已从动作行移到头部，且是无文字图标（textContent 为空）。
+  // 断言动作行文字时必须把它剔掉，否则一个空串会混进来，也测不出它是否真移走。
+  const actionRowButtons = () =>
+    Array.from(container.querySelectorAll('button'))
+      .filter((b) => b.getAttribute('data-testid') !== 'bar-open-app')
+      .map((b) => b.textContent);
+  check('动作行为 润色/复制/采纳/关闭（不含头部图标）',
+    JSON.stringify(actionRowButtons()) === JSON.stringify(['润色', '复制', '采纳', '关闭']),
+    JSON.stringify(actionRowButtons()));
 
-  check('折叠区默认折叠：看不到场景下拉',
-    container.querySelector('[data-testid="bar-scene"]') === null);
-  const advToggle = container.querySelector<HTMLButtonElement>('[data-testid="bar-advanced-toggle"]');
-  check('折叠区有展开按钮', advToggle != null);
-  advToggle?.click();
-  await flush();
-  check('展开后出现场景/语气下拉',
+  const openAppIcon = container.querySelector<HTMLButtonElement>('[data-testid="bar-open-app"]');
+  check('头部有「打开应用」图标且 aria-label=title=bar.openApp',
+    openAppIcon != null &&
+      openAppIcon.getAttribute('aria-label') === '打开应用' &&
+      openAppIcon.getAttribute('title') === '打开应用',
+    JSON.stringify({
+      present: openAppIcon != null,
+      aria: openAppIcon?.getAttribute('aria-label'),
+      title: openAppIcon?.getAttribute('title'),
+    }));
+
+  // 折叠区已移除：场景/语气常驻条底，进入 reviewing 立即可见。
+  check('场景/语气常驻（reviewing 即可见，且无折叠开关）',
     container.querySelector('[data-testid="bar-scene"]') != null &&
-      container.querySelector('[data-testid="bar-tone"]') != null);
+      container.querySelector('[data-testid="bar-tone"]') != null &&
+      container.querySelector('[data-testid="bar-advanced-toggle"]') == null);
 
   // 编辑 → 复制，复制内容必须是**编辑后**的文本
   copyCtl.text = null;
