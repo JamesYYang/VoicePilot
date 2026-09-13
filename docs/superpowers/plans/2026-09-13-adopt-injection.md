@@ -611,9 +611,16 @@ export function pasteTo(target) {
   // 只断言 ok===false 是不够的 —— 平台实现若没做 kind 校验，会去解构不存在的 hwnd，
   // 要么抛（被 index 兜成 'send-failed'）要么把 undefined 当 0（'stale'），两种都会
   // 让 ok===false 成立，断言就变成了假绿。
-  const wrongKind = await pasteTo({ kind: 'mac', pid: 1, bundleId: null });
-  check('平台不匹配的目标被拒绝，且 reason 精确为 no-target',
-    wrongKind?.reason === 'no-target', JSON.stringify(wrongKind));
+  //
+  // ⚠️ 必须做平台守卫：这个自测文件在 macOS 上也会跑，而那里 `impl` 是 `mac`，
+  // `pasteTo({kind:'mac'})` 会走到**真实的** `mac.activate` —— 这条断言会红在
+  // 「'permission' 或 'stale'，但不是 'no-target'」上，而且是用一个真实 pid 去激活
+  // 真实应用。它验的是 **win.js 的 kind 守卫**，在 macOS 上本就无从验。
+  if (process.platform === 'win32') {
+    const wrongKind = await pasteTo({ kind: 'mac', pid: 1, bundleId: null });
+    check('平台不匹配的目标被拒绝，且 reason 精确为 no-target',
+      wrongKind?.reason === 'no-target', JSON.stringify(wrongKind));
+  }
 ```
 
 并把顶部 import 改为：
@@ -690,10 +697,15 @@ function lib() {
   const msgSendI32 = objc.func('int32_t objc_msgSend(void* receiver, void* selector)');
   const msgSendCStr = objc.func('const char* objc_msgSend(void* receiver, void* selector)');
   const msgSendPtrI32 = objc.func('void* objc_msgSend(void* receiver, void* selector, int32_t arg)');
-  // activateWithOptions: 的参数是 NSUInteger（64 位）。**必须声明成 64 位**：声明成
+  // activateWithOptions: 的参数是 NSUInteger（64 位），**必须声明成 64 位**：声明成
   // uint32_t 时 koffi 只写寄存器的低 32 位，高 32 位是什么由 ABI 决定，目标可能读到一个
   // 天文数字的 options。传 number 即可（Task 1 实测 uintptr_t 与 number 互通）。
-  const msgSendVoidUPtr = objc.func('void objc_msgSend(void* receiver, void* selector, uintptr_t arg)');
+  //
+  // 返回类型是 **BOOL**（方法签名 `- (BOOL)activateWithOptions:`），不是 void。
+  // 但**不要使用这个返回值**：macOS 14 起该位（IgnoringOtherApps）已被弃用，实测常见
+  // 「返回 YES 却没真的置前」。本设计的成功判据是**回读前台窗口**那一条（spec §3），
+  // 多一个会骗人的判据只会引入误报。声明成 bool 只是为了让声明与 API 一致。
+  const msgSendBoolUPtr = objc.func('bool objc_msgSend(void* receiver, void* selector, uintptr_t arg)');
 
   // 只为确保 AppKit 已在本进程里加载，否则 objc_getClass('NSWorkspace') 会拿到 null。
   // Electron 是 Cocoa 应用、AppKit 本来就在，这一行是把这层隐含依赖写明白。
@@ -722,7 +734,7 @@ function lib() {
     msgSendI32,
     msgSendCStr,
     msgSendPtrI32,
-    msgSendVoidUPtr,
+    msgSendBoolUPtr,
     CGEventCreateKeyboardEvent,
     CGEventSetFlags,
     CGEventPost,
@@ -818,7 +830,8 @@ export async function activate(target) {
   const app = a.msgSendPtrI32(a.NSRunningApplication, a.sel_runningAppWithPid, target.pid);
   if (!app) return { ok: false, reason: 'stale' };
 
-  a.msgSendVoidUPtr(app, a.sel_activateWithOptions, BOTH_ACTIVATION_OPTIONS);
+  // 返回值故意丢弃：见 lib() 里 msgSendBoolUPtr 的注释（macOS 14+ 上它会骗人）。
+  a.msgSendBoolUPtr(app, a.sel_activateWithOptions, BOTH_ACTIVATION_OPTIONS);
 
   await sleep(ACTIVATE_WAIT_MS);
   return { ok: true, id: frontPid() };
@@ -838,15 +851,28 @@ Task 3 写的 `index.js` 的 `pasteTo` 是：`impl.activate(target)` → `classi
 `app/electron/selftest/inject.js`，在 `const failed = results.filter(...)` **之前**追加：
 
 ```js
-  // ---- macOS 路径：Windows 上走不到，但可以验它不会被误调用 ----
-  // 这条是防「index.js 的平台分派写反 / 平台实现忘了守 kind」的护栏。
-  // 断言精确到 reason='no-target'（理由同 Task 3 那条：只看 ok===false 会假绿）。
-  const macShaped = await pasteTo({ kind: 'mac', pid: process.pid, bundleId: null });
-  check('Windows 上拒绝 mac 形状的目标，reason 精确为 no-target',
-    macShaped?.reason === 'no-target', JSON.stringify(macShaped));
+  // ---- macOS 路径：**必须做平台守卫** ----
+  // ⚠️ 这个自测文件本身有 darwin 分支（见 Task 1 的 `process.platform === 'darwin'`），
+  // 所以它会真的在 macOS 上跑。而在 macOS 上 `impl` 就是 `mac`，`pasteTo({kind:'mac'})`
+  // **不会**命中 win.js 的 kind 守卫，而是走到真实的 `mac.activate`：
+  //   - 断言 `reason === 'no-target'` 在 macOS 上必红；
+  //   - 更糟的是若用 `pid: process.pid`（我们自己）且已授权，它会真的激活本应用、
+  //     回读匹配、然后**发出一次真正的 Cmd+V** —— 自测朝当时的前台窗口打按键。
+  // 所以这里用 win32 守卫：这两条验的是 **Windows 平台的 kind 守卫**，在 macOS 上
+  // 本来就无从验，跳过即可。macOS 侧的真实行为归 Task 8 的真机清单。
+  if (process.platform === 'win32') {
+    const macShaped = await pasteTo({ kind: 'mac', pid: process.pid, bundleId: null });
+    check('Windows 上拒绝 mac 形状的目标，reason 精确为 no-target',
+      macShaped?.reason === 'no-target', JSON.stringify(macShaped));
+  }
 ```
 
-> **Windows 上验不到的东西（必须原样写进 Task 8 的清单与完成报告）**：`objc_msgSend` 的五个声明是否都对、`frontPid()` 是否真的返回前台应用 pid、`activateWithOptions:` 是否真能把目标拉到前台、`CGEventPost` 在有权限时是否真的粘上。
+> **Windows 上验不到的东西（必须原样写进 Task 8 的清单与完成报告）**：
+> - `objc_msgSend` 的五个声明是否都对（每个声明对应哪个方法、返回宽度是否匹配）；
+> - `AXIsProcessTrusted` **能否从 ApplicationServices 伞形框架里解析到符号**（该符号实际在 HIServices，靠伞形框架再导出；若解析不到，`lib()` 会在首次使用时抛）；
+> - `frontPid()` 是否真的返回前台应用 pid；`pid === process.pid` 这条自查护栏所依赖的「`frontmostApplication` 返回主进程 pid」这一 Electron 进程模型假设是否成立；
+> - `activateWithOptions:` 是否真能把目标应用拉到前台（`IgnoringOtherApps` 位自 macOS 14 起已弃用，实测常见「调用成功但没到前台」）；
+> - `CGEventPost` 在授予辅助功能权限后是否真的粘上。
 
 - [ ] **Step 4: 运行**
 
