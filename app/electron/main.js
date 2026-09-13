@@ -154,6 +154,9 @@ function createBar() {
     height: BAR.height,
     x: x + width - BAR.width - BAR.margin,
     y: y + height - BAR.height - BAR.margin,
+    // 悬浮条必须自带图标：Windows 上没设 icon 的窗口回退到宿主 exe 的图标，
+    // 开发模式下就是 electron.exe 的 Electron 标志。其余窗口都设了同一个 icon。
+    icon: join(HERE, '..', 'build', 'voicepilot-icon-256.png'),
 
     frame: false,
     transparent: true,
@@ -437,6 +440,12 @@ async function refreshAuthFromTray() {
 // ---------------------------------------------------------------- 生命周期
 
 app.whenReady().then(async () => {
+  // Windows：把进程归到 VoicePilot 的 AppUserModelID 上。
+  // 不设的话开发模式下进程沿用 electron.exe 的身份，任务栏图标是 Electron 的；
+  // 这个值必须与 app/package.json 的 build.appId 一致（com.voicepilot.app），
+  // 打包出的快捷方式与运行中的进程才会共享同一个任务栏身份。
+  if (process.platform === 'win32') app.setAppUserModelId('com.voicepilot.app');
+
   // 离线自测：不建任何窗口，跑完就退出。这样它能在无人值守的机器上跑，
   // 并且验的就是主进程的真实路径（含 config.js 的 app.isPackaged 守卫）。
   // 协议与 IPC 必须先注册：自测窗口也走 app:// 协议，也要用到 vp:copy 等通道。

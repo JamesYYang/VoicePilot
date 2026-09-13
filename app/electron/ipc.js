@@ -40,7 +40,17 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     // 这行被删掉时，界面自测看不见，只有那边的纯函数断言能拦下来。
     // 注意这里**不调用 focus()**：切成可聚焦只是允许用户点击进来。
     if (channel === 'vp:state') {
-      bar.setFocusable(isBarFocusable(payload?.state));
+      const focusable = isBarFocusable(payload?.state);
+      // 只在值真的变化时才切 focusable：setFocusable 会触发 SWP_FRAMECHANGED，
+      // shell 收到 frame change 后会重新评估这个窗口并重建它的任务栏按钮。
+      // 悬浮条是 skipTaskbar 窗口，本该完全没有任务栏按钮，也不能因为每次状态
+      // 广播都来一次多余的 frame change 而被反复重建。
+      if (bar.isFocusable() !== focusable) {
+        bar.setFocusable(focusable);
+        // frame change 会抵消 skipTaskbar 已有的效果，立刻重申一次，
+        // 保证「不抢焦点」（A2）之外的另一个窗口属性——不在任务栏露脸——也守得住。
+        bar.setSkipTaskbar(true);
+      }
       // 会话回到 idle/warming 时把窗口收回基础高度。resizeBar 只增不减，不复位
       // 就会让下一段空文本继承上一段的高窗（见 main.js resetBarHeight）。listening/
       // draining 会长文本、reviewing 要放编辑区，都不复位。
