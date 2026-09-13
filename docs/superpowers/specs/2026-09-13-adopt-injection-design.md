@@ -182,7 +182,9 @@ adopt():
 | 同上 §9 | F12 前置仍是**一项**（辅助功能），但原因从 `osascript` 改为 `CGEventPost`；明确不涉及 Apple Events |
 | 同上 §11 待验证第 1 条 | 关闭（选型已定） |
 
-### 7.2 待 Plan 2B 实施时同步（描述的是**已交付行为**，实现落地前改了会骗人）
+### 7.2 已随 Plan 2B 实施同步（2026-09-13）
+
+> 下表三项原本写「待实现落地时同步」（描述的是**已交付行为**，提前改会骗人）。实现已落地，**三项均已按本表同步完毕**；实测结论见 §8。
 
 | 文档 | 改动 |
 |---|---|
@@ -193,10 +195,18 @@ adopt():
 ## 8. 待验证 / 实现时定的点
 
 1. **koffi 能否在 Windows 与 macOS（arm64、打包版）加载并调用** —— 实施第一步。
+   **结论（2026-09-13）**：**Windows 开发机已实测**——`koffi@3.2.1` 预编译安装、无编译器步骤；`koffi.load('user32.dll')` 成功；`GetForegroundWindow()` 返回真实 HWND（`uintptr_t` 返回 **`number`**，可直接 `!==` 比较；`void*` 返回 `bigint`）。**macOS（arm64）与两个平台的打包版未验（需 Mac 真机 / 打包产物）**：从未在 macOS 上执行过。验法与判据见 `docs/adopt-injection-test-runbook.md` 用例 7 与用例 1–2。
 2. **asarUnpack 是否生效**（smartUnpack 自动处理，还是需要显式配置）。
+   **结论（2026-09-13）**：**已实测（Windows 开发机）**，且**必须显式配**。koffi 3.x 的原生二进制在 `node_modules/@koromix/koffi-<platform>-<arch>/`，**不在** `node_modules/koffi/`，所以只写 `node_modules/koffi/**` 是空操作。已改为 `["node_modules/koffi/**", "node_modules/@koromix/**"]`（`app/package.json`）。A/B 证据：`electron-builder --win --dir` + `-c.asar.smartUnpack=false`，旧 glob 下 `.node` 留在 asar 内（`unpacked=false`），新 glob 下移出（asar 缩小约 1.04 MB，与 `koffi.node` + `koffi.lib` 吻合），产物实测在 `release/win-unpacked/resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node`，1,036,800 B。⚠️ **这只证明文件「移出去了」，不证明应用能「加载它」**——后者属第 1 条的未验部分。
 3. **macOS arm64 上 `.node` 的 adhoc 签名**是否需要 afterPack 钩子。
+   **结论（2026-09-13）**：**未验（需 Mac 真机 + 打包产物）**。当前**没有**加 afterPack 钩子。若打包版启动即报 koffi 加载失败，再加 `codesign -s -`；验法与降级判据见 runbook 用例 7 ②/降级条件。
 4. `SetForegroundWindow` 被前台锁拒绝的实际频率，以及 `AttachThreadInput` 兜底是否够用。
+   **结论（2026-09-13）**：**未验（需真机）**。开发机上只探过一次兜底路径要用的 `GetWindowThreadProcessId(hwnd, null)`，返回了合理线程 id、未抛异常；但**拒绝频率与兜底是否真能把窗口置前都没测过**。验法：runbook 用例 2 / 6a，观察是否报 `activate-failed`。
 5. `activateWithOptions:` 在新系统上已弃用，在 macOS 14+ 的实际行为需实测（必要时改用 `activateFromApplication:options:`）。
+   **结论（2026-09-13）**：**未验（需 Mac 真机）**。实现已按「它会骗人」处理——**故意丢弃返回值**，成功判据只用「回读前台 pid」（`app/electron/inject/mac.js` 的 `msgSendBoolUPtr` 注释）。真机仍需确认两件事：① 它到底能不能把目标应用置前；② 若不能，是否改用 `activateFromApplication:options:`。
 6. **`objc_msgSend` 经 koffi 的脆弱度** —— 若不可用，走 §4.2 的 `open -b` 退路。
+   **结论（2026-09-13）**：**未验（需 Mac 真机）**。macOS 实现自写出后**从未执行过**，以下全部待验：五个 `objc_msgSend` 声明（`msgSendPtr` / `msgSendI32` / `msgSendCStr` / `msgSendPtrI32` / `msgSendBoolUPtr`）的形状正确性；`AXIsProcessTrusted` 能否从 ApplicationServices umbrella framework 解析出符号（符号实际在 HIServices）；`frontPid()` 是否返回真实前台 pid；`pid === process.pid` 自守的前提（`frontmostApplication` 报的是我们主进程 pid）是否成立；`CGEventPost` 在授权后是否真的粘贴一次。全部通过前不得启用 `open -b` 退路，也不得改本决策。
 7. 置前与发键之间的间隔在各平台上定稿（Windows 60ms / macOS 120ms 是起点，不是承诺）。
+   **结论（2026-09-13）**：**未验（需真机）**，仍取起点值——Windows 60ms（`app/electron/inject/win.js`）、macOS 120ms（`app/electron/inject/mac.js`）。真机若出现「窗口置前了但按键发早/发晚」，按 runbook 记录现象后再调这两个常量。
 8. 各失败 `reason` 对应的中文文案（三语齐全，走 `app/shared/i18n/*`）。
+   **结论（2026-09-13）**：**已实测（Windows 开发机，自动化）**。5 个 `reason` 的三语文案已落在 `app/shared/i18n/{zh-CN,zh-TW,en-US}.js`，i18n 三语键齐自测通过；渲染层用显式映射（`app/src/App.tsx` 的 `ADOPT_FAIL_TEXT`）而不是拼 key，`permission` / `stale` 有独立文案，界面自测锁定了 zh-CN 原文。⚠️ **未验的是真机上能否分别触发到这几个 `reason`**（即失败归类的实际正确性），见 runbook 用例 1 / 3 / 6。
