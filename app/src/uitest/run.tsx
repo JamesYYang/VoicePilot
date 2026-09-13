@@ -4,6 +4,7 @@ import Studio from '../studio/Studio';
 import SettingsView from '../studio/SettingsView';
 import { I18nProvider } from '../i18n';
 import { acceleratorFromEvent } from '../studio/shortcutKeys';
+import { derivePhraseTitle } from '../phrases/title';
 
 /**
  * 悬浮条界面自测。用法：
@@ -774,11 +775,15 @@ export async function runUiTest() {
     barEditor()?.value === '今天我们要讨论三件事\n第一件是采集\n第二件是识别\n第三件是润色',
     JSON.stringify(barEditor()?.value));
 
-  // 「打开应用」已从动作行移到头部，且是无文字图标（textContent 为空）。
-  // 断言动作行文字时必须把它剔掉，否则一个空串会混进来，也测不出它是否真移走。
+  // 「打开应用」「存为常用语」都是头部的无文字图标（textContent 为空）。
+  // 断言动作行文字时必须把它们剔掉，否则空串会混进来，也测不出它们是否真移走。
   const actionRowButtons = () =>
     Array.from(container.querySelectorAll('button'))
-      .filter((b) => b.getAttribute('data-testid') !== 'bar-open-app')
+      .filter(
+        (b) =>
+          b.getAttribute('data-testid') !== 'bar-open-app' &&
+          b.getAttribute('data-testid') !== 'bar-save-phrase'
+      )
       .map((b) => b.textContent);
   check('动作行为 润色/复制/采纳/关闭（不含头部图标）',
     JSON.stringify(actionRowButtons()) === JSON.stringify(['润色', '复制', '采纳', '关闭']),
@@ -1172,6 +1177,61 @@ export async function runUiTest() {
     container.querySelector('[data-testid="phrases-empty"]')?.textContent ===
       '还没有常用语。在结果里点书签图标存一条。',
     JSON.stringify(container.querySelector('[data-testid="phrases-empty"]')?.textContent));
+
+  // ---- 26. 条内「存为常用语」：存入的是有效文本，且不打断 ----
+  await enterReviewing();
+  phraseSaveCtl.payload = null;
+  // 制造「编辑区被改过、但没有润色结果」的局面，验证存的是编辑后的原文
+  const ed2 = container.querySelector<HTMLTextAreaElement>('[data-testid="bar-editor"]');
+  if (ed2) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setter?.call(ed2, '第一行标题\n第二行正文');
+    ed2.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  await flush();
+
+  const saveBtn = container.querySelector<HTMLButtonElement>('[data-testid="bar-save-phrase"]');
+  check('reviewing 头部有「存为常用语」图标且 aria-label=title',
+    saveBtn != null &&
+      saveBtn.getAttribute('aria-label') === '存为常用语' &&
+      saveBtn.getAttribute('title') === '存为常用语',
+    JSON.stringify({ present: saveBtn != null, aria: saveBtn?.getAttribute('aria-label') }));
+
+  // 位置回归护栏：与「打开应用」同一套理由 —— 必须不在动作行内、父节点是头部
+  check('「存为常用语」不在动作行内、父节点是头部（位置回归护栏）',
+    saveBtn?.closest('[data-testid="bar-actions"]') === null &&
+      saveBtn?.parentElement === container.querySelector('[data-testid="bar-head"]'),
+    JSON.stringify({
+      insideActions: saveBtn?.closest('[data-testid="bar-actions"]') != null,
+      parentIsHead: saveBtn?.parentElement === container.querySelector('[data-testid="bar-head"]'),
+    }));
+
+  saveBtn?.click();
+  await waitFor(() => phraseSaveCtl.payload != null);
+  // waitFor 的判据是「phrasesSave 已被调用」，而它同步就成立；setHint 的渲染落在
+  // 更晚的一轮调度里。多等一拍再断言提示节点，否则会拿不到节点误判失败。
+  await flush();
+  const saved = phraseSaveCtl.payload as { title: string; text: string } | null;
+  check('存的是编辑后的原文（无润色时）',
+    saved?.text === '第一行标题\n第二行正文', JSON.stringify(saved));
+  check('标题自动取第一个非空行', saved?.title === '第一行标题', JSON.stringify(saved?.title));
+  check('保存成功给出轻提示（不关闭悬浮条、不占错误气泡）',
+    container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent === '已存为常用语' &&
+      container.querySelector('[data-testid="bar-editor"]') != null,
+    JSON.stringify(container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent));
+
+  // derivePhraseTitle 的边界（纯函数，直接验）
+  check('derivePhraseTitle：空串 → 空', derivePhraseTitle('') === '', JSON.stringify(derivePhraseTitle('')));
+  check('derivePhraseTitle：全空白 → 空',
+    derivePhraseTitle('   \n\n  ') === '', JSON.stringify(derivePhraseTitle('   \n\n  ')));
+  check('derivePhraseTitle：跳过前导空行取第一个非空行',
+    derivePhraseTitle('\n\n  第二行才是标题  \n第三行') === '第二行才是标题',
+    JSON.stringify(derivePhraseTitle('\n\n  第二行才是标题  \n第三行')));
+  check('derivePhraseTitle：恰好 40 字符不截断',
+    derivePhraseTitle('a'.repeat(40)) === 'a'.repeat(40));
+  check('derivePhraseTitle：41 字符截断到 40 并补省略号',
+    derivePhraseTitle('a'.repeat(41)) === 'a'.repeat(40) + '…',
+    JSON.stringify(derivePhraseTitle('a'.repeat(41))));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

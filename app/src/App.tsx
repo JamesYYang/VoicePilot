@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, Ref } from 'react';
 import { CaptureEngine } from './audio/capture';
 import { useT } from './i18n';
+import { derivePhraseTitle } from './phrases/title';
 
 /**
  * 悬浮条（PRD §4.1 / §5.6）。
@@ -600,6 +601,25 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     void vp.toggle();
   }, [edited, persistEdited, vp]);
 
+  /**
+   * 存为常用语。存 effectiveText（有润色存润色，否则存手改后的原文）——
+   * 与「采纳」同一口径：用户点了润色就是想让那段文本生效。
+   *
+   * 提示走 hint 而不是 error：它不是错误，且不该把 errorHold 的 5 秒停留卷进来。
+   */
+  const savePhrase = useCallback(() => {
+    const text = effectiveText;
+    if (text.trim().length === 0) return;
+    void (async () => {
+      try {
+        await vp.phrasesSave({ title: derivePhraseTitle(text), text });
+        setHint(t('bar.savedPhrase'));
+      } catch {
+        setHint(t('bar.savePhrase.fail'));
+      }
+    })();
+  }, [effectiveText, vp, t]);
+
   const close = useCallback(() => {
     void persistEdited();
     void vp.toggle();
@@ -708,35 +728,56 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
               : ''}
           </span>
         )}
-        {/* 「打开应用」只作用于成稿文本，且会把文本交给主应用 —— 聆听三态里
-            点击只会和听写抢场控，所以仅 reviewing 显示。marginLeft:'auto' 把它
-            推到头部右端（头部是 flex 行）。无障碍名只剩 aria-label/title
-            （没有可见文字），两个都要给。 */}
+        {/* 头部两个图标只作用于成稿文本，且都在「聆听三态」之外才有意义
+            （点击只会和听写抢场控），所以仅 reviewing 显示。它们没有可见文字，
+            无障碍名只剩 aria-label/title，两个都要给。
+            marginLeft:'auto' 只由**最左**那个（「存为常用语」）承担：头部是 flex
+            行，它把整组推到右端；若两个都带，自动外边距会被平摊，位置就错了。 */}
         {snap.state === 'reviewing' && (
-          <button
-            style={styles.iconButton}
-            data-testid="bar-open-app"
-            title={t('bar.openApp')}
-            aria-label={t('bar.openApp')}
-            onClick={openApp}
-          >
-            {/* 内联 SVG（14×14，无图标库依赖）：圆角矩形 + 从右上角逃逸的箭头 */}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+          <>
+            {/* 存为常用语。内联 SVG（14×14，无图标库依赖）：书签形状。
+                marginLeft:'auto' 由它承担（它是最左的那个图标），把整组推到右端。 */}
+            <button
+              style={styles.iconButton}
+              data-testid="bar-save-phrase"
+              title={t('bar.savePhrase')}
+              aria-label={t('bar.savePhrase')}
+              onClick={savePhrase}
+              disabled={effectiveText.trim().length === 0}
             >
-              <rect x="2" y="4" width="8" height="8" rx="1.5" />
-              <path d="M8 2h4v4" />
-              <path d="M12 2 6.5 7.5" />
-            </svg>
-          </button>
+              <svg
+                width="14" height="14" viewBox="0 0 14 14" fill="none"
+                stroke="currentColor" strokeWidth="1.4"
+                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+              >
+                <path d="M3.5 2h7a1 1 0 011 1v9L7 9l-4.5 3V3a1 1 0 011-1z" />
+              </svg>
+            </button>
+            <button
+              style={styles.iconButtonNoAuto}
+              data-testid="bar-open-app"
+              title={t('bar.openApp')}
+              aria-label={t('bar.openApp')}
+              onClick={openApp}
+            >
+              {/* 内联 SVG（14×14，无图标库依赖）：圆角矩形 + 从右上角逃逸的箭头 */}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="2" y="4" width="8" height="8" rx="1.5" />
+                <path d="M8 2h4v4" />
+                <path d="M12 2 6.5 7.5" />
+              </svg>
+            </button>
+          </>
         )}
       </div>
 
@@ -1038,10 +1079,24 @@ const styles = {
     fontSize: 12,
     cursor: 'pointer' as const,
   },
-  // 头部右侧的小图标按钮（「打开应用」）。marginLeft:'auto' 在 flex 头部行里
-  // 把它推到最右。lineHeight:0 消掉行内基线带来的多余高度。
+  // 头部最左的小图标按钮（「存为常用语」）。marginLeft:'auto' 在 flex 头部行里
+  // 把整组图标推到最右。lineHeight:0 消掉行内基线带来的多余高度。
   iconButton: {
     marginLeft: 'auto',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 4,
+    borderRadius: 6,
+    border: '1px solid #d1d5db',
+    background: 'transparent',
+    color: '#6b7280',
+    cursor: 'pointer' as const,
+    lineHeight: 0,
+  },
+  // 头部第二个图标：不承担 marginLeft:'auto'（那个由它左边那个负责），
+  // 否则两个都吃自动外边距，间距和位置都会错。
+  iconButtonNoAuto: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
