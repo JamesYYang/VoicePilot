@@ -1,5 +1,6 @@
 import koffi from 'koffi';
 import { captureTarget, classifyForeground, pasteTo, pasteWith } from '../inject/index.js';
+import { INPUT_SIZE } from '../inject/win.js';
 
 /**
  * 注入层自测。
@@ -18,6 +19,11 @@ export async function runInjectSelftest() {
   check('koffi 已加载且暴露 load()', typeof koffi?.load === 'function');
 
   if (process.platform === 'win32') {
+    // SendInput 的 INPUT 结构在 x64 下必须是 40 字节。**尺寸错了它只会返回 0**，
+    // 也就是「按键静默不生效」—— 正是真机上「报成功却没插进去」那类症状最难查的形态。
+    // 所以这条必须有断言钉住，不能靠肉眼。
+    check('SendInput 的 INPUT 结构为 40 字节（x64）', INPUT_SIZE === 40, `INPUT_SIZE=${INPUT_SIZE}`);
+
     // 这里验的是「开发态能加载并调用 real user32」。
     // **不能**声称验了「打包后 .node 能被 dlopen」—— 那条只在打包版成立，见 Task 8 的 runbook。
     const user32 = koffi.load('user32.dll');

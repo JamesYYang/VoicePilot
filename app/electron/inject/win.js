@@ -16,8 +16,9 @@ const KEYEVENTF_KEYUP = 0x0002;
 // 诊断用：换掉「要发什么键」，用来区分失败发生在哪一段。
 //   type      —— 只发一个字面字符 z：若它进不去，说明按键**根本没被目标收到**
 //   selectall —— 发 Ctrl+A：在 Word/浏览器/终端里都有可见效果且不破坏内容
-//   scancode  —— 仍发 Ctrl+V，但把 bScan 填成真实扫描码（MapVirtualKey）
-// 不设 = 现状（Ctrl+V，bScan=0）。
+// 不设 = 现状（Ctrl+V）。
+// （曾有个 scancode 模式用来验「扫描码传 0 被丢弃」—— 真机已证伪：带真实扫描码同样
+//   不生效，真正根因是修饰键丢失，见 INPUT 结构处。已删，不留死代码。）
 const PROBE = process.env.VP_INJECT_PROBE ?? '';
 // 置前是异步的：SetForegroundWindow 返回时目标未必已经真的拿到前台。
 // 60ms 是起点不是承诺（spec §8 第 7 条），真机不合就在 Task 8 调。
@@ -59,8 +60,52 @@ const GUITHREADINFO = koffi.struct('GUITHREADINFO', {
   rcCaret: RECT,
 });
 
-let api = null;
+/**
+ * SendInput 的 INPUT 结构。
+ *
+ * ⚠️ 为什么**必须**用 SendInput、不能用四次独立的 keybd_event（这是真机踩出来的）：
+ * modifier 与键必须**原子**投递。四次独立调用时，Ctrl 的按下经常还没生效，V/A 就已经
+ * 被目标处理了 —— 于是 Ctrl+V 退化成裸字符 V、Ctrl+A 退化成裸 A。真机现象：
+ * 「Word 里冒出一个 A」「记事本碰巧行，Word/浏览器/终端时灵时不灵」。
+ * SendInput 一次调用把全部事件作为**一批**放进输入流，修饰键状态是确定的。
+ *
+ * 规划早期刻意选了 keybd_event 以避开 INPUT 的联合体对齐 —— 那个取舍正是这个 bug 的来源。
+ * 对齐的坑用 koffi.sizeof 正面解决：x64 下 INPUT 必须 40 字节，`INPUT_SIZE` 导出去给自测断言
+ * （尺寸错了 SendInput 只会返回 0，属于「静默不生效」，必须有断言钉住）。
+ */
+const MOUSEINPUT = koffi.struct('MOUSEINPUT', {
+  dx: 'int32',
+  dy: 'int32',
+  mouseData: 'uint32',
+  dwFlags: 'uint32',
+  time: 'uint32',
+  dwExtraInfo: 'uintptr_t',
+});
+const KEYBDINPUT = koffi.struct('KEYBDINPUT', {
+  wVk: 'uint16',
+  wScan: 'uint16',
+  dwFlags: 'uint32',
+  time: 'uint32',
+  dwExtraInfo: 'uintptr_t',
+});
+const HARDWAREINPUT = koffi.struct('HARDWAREINPUT', {
+  uMsg: 'uint32',
+  wParamL: 'uint16',
+  wParamH: 'uint16',
+});
+const INPUT_UNION = koffi.union('INPUT_UNION', {
+  mi: MOUSEINPUT,
+  ki: KEYBDINPUT,
+  hi: HARDWAREINPUT,
+});
+const INPUT = koffi.struct('INPUT', { type: 'uint32', u: INPUT_UNION });
 
+/** x64 下必须是 40。导出给自测断言 —— 错了会静默不生效，不能只靠肉眼。 */
+export const INPUT_SIZE = koffi.sizeof(INPUT);
+
+const INPUT_KEYBOARD = 1;
+
+let api = null;
 /** 惰性建一次动态库句柄与函数声明。 */
 function lib() {
   if (api) return api;
@@ -87,12 +132,9 @@ function lib() {
     AttachThreadInput: user32.func(
       'bool AttachThreadInput(uint32 idAttach, uint32 idAttachTo, bool fAttach)'
     ),
-    // 用 keybd_event 而不是 SendInput：本场景只要一次四键组合，用不上 SendInput 的
-    // 批量能力；而 SendInput 要声明 INPUT 联合体，x64 下有 4 字节对齐填充（应为 40
-    // 字节），写错了不报错、只是静默不生效。keybd_event 已废弃但仍在 user32 里工作，
-    // 签名只有四个标量参数。
-    keybd_event: user32.func('void keybd_event(uint8 bVk, uint8 bScan, uint32 dwFlags, uintptr_t dwExtraInfo)'),
-    MapVirtualKeyW: user32.func('uint32 MapVirtualKeyW(uint32 uCode, uint32 uMapType)'),
+    // 一次调用投递整批按键。**不要**改回多次 keybd_event —— 那样 modifier 会丢，
+    // 详见上面 INPUT 结构处的说明。
+    SendInput: user32.func('uint32 SendInput(uint32 cInputs, INPUT* pInputs, int cbSize)'),
   };
   return api;
 }
@@ -153,8 +195,37 @@ function describeWindow(hwnd) {
 }
 
 /**
+ * 把一串按键作为**一个批次**投递（原子）。
+ * keys = [[wVk, dwFlags], ...]
+ */
+function injectKeys(keys) {
+  const a = lib();
+  const events = keys.map(([wVk, dwFlags]) => ({
+    type: INPUT_KEYBOARD,
+    u: { ki: { wVk, wScan: 0, dwFlags, time: 0, dwExtraInfo: 0 } },
+  }));
+  const sent = a.SendInput(events.length, events, INPUT_SIZE);
+  if (sent !== events.length) {
+    // SendInput 会校验 cbSize：尺寸错就返回 0。**不能静默** —— 静默正是这个 bug 之前的形态。
+    console.warn(
+      `[注入] ⚠️ SendInput 只投递了 ${sent}/${events.length} 个事件（INPUT_SIZE=${INPUT_SIZE}，应为 40）`
+    );
+  }
+}
+
+/**
+ * Ctrl + 某个键：修饰键先按下、目标键按下抬起、修饰键最后抬起。
+ * 这一串**必须整批投递**，否则修饰键会丢（见 INPUT 结构处的说明）。
+ */
+const ctrlChord = (vk) => [
+  [VK_CONTROL, 0],
+  [vk, 0],
+  [vk, KEYEVENTF_KEYUP],
+  [VK_CONTROL, KEYEVENTF_KEYUP],
+];
+
+/**
  * 发一次 Ctrl+V。**由 index.js 在确认目标窗口已到前台之后调用**（见 Step 2）。
- * keybd_event 返回 void，所以只能靠「有没有抛」判断失败。
  *
  * 单独成一个原语、而不是塞进 activate() 里：发键必须发生在「回读确认目标确实到了
  * 前台」**之后**。若在确认之前发，置前失败时这串按键会落到当时的前台窗口上 ——
@@ -176,27 +247,19 @@ export function sendPaste() {
   // 按键（而不是"收到了但粘贴没发生"）—— 这两条的修法完全不同。
   if (PROBE === 'type') {
     dbg('探针模式 type：只发一个 z');
-    a.keybd_event(VK_Z, 0, 0, 0);
-    a.keybd_event(VK_Z, 0, KEYEVENTF_KEYUP, 0);
+    injectKeys([
+      [VK_Z, 0],
+      [VK_Z, KEYEVENTF_KEYUP],
+    ]);
     return;
   }
   // 诊断：Ctrl+A。在 Word / 浏览器 / 终端里都有可见效果，且不破坏内容。
   if (PROBE === 'selectall') {
     dbg('探针模式 selectall：发 Ctrl+A');
-    a.keybd_event(VK_CONTROL, 0, 0, 0);
-    a.keybd_event(VK_A, 0, 0, 0);
-    a.keybd_event(VK_A, 0, KEYEVENTF_KEYUP, 0);
-    a.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+    injectKeys(ctrlChord(VK_A));
     return;
   }
-  // bScan：现状一律传 0。部分应用（尤其 Chromium 系与 Office）会参考扫描码，
-  // 传 0 可能被当成无效键丢弃 —— 这是待验证的候选根因之一，故做成可切换的探针。
-  const scan = (vk) => (PROBE === 'scancode' ? a.MapVirtualKeyW(vk, 0) : 0);
-  if (PROBE === 'scancode') dbg(`探针模式 scancode：Ctrl+V，扫描码 ctrl=${scan(VK_CONTROL)} v=${scan(VK_V)}`);
-  a.keybd_event(VK_CONTROL, scan(VK_CONTROL), 0, 0);
-  a.keybd_event(VK_V, scan(VK_V), 0, 0);
-  a.keybd_event(VK_V, scan(VK_V), KEYEVENTF_KEYUP, 0);
-  a.keybd_event(VK_CONTROL, scan(VK_CONTROL), KEYEVENTF_KEYUP, 0);
+  injectKeys(ctrlChord(VK_V));
 }
 
 /**
