@@ -3,7 +3,7 @@ import {
   openStore, openStoreWithDb, saveHistory, listHistory, getHistory, updateHistoryPolish,
   updateHistoryText,
   deleteHistory, listPresets, savePreset, deletePreset, getMeta, setMeta, migrateDefaultScene,
-  getShortcut, setShortcut, resolvePolishTarget,
+  getShortcut, setShortcut, getPhraseShortcut, setPhraseShortcut, resolvePolishTarget,
   savePhrase, listPhrases, updatePhrase, deletePhrase, touchPhrase,
 } from '../store.js';
 
@@ -123,6 +123,11 @@ export async function runStoreSelftest() {
   setShortcut('CommandOrControl+Shift+K');
   const okShortcutOverwrite = getShortcut() === 'CommandOrControl+Shift+K';
 
+  // 常用语快捷键是**另一个槽位**，与上面三条互不影响（各自独立的 meta 键）
+  const okPhraseShortcutDefault = getPhraseShortcut() === null;
+  setPhraseShortcut('Control+Alt+Space');
+  const okPhraseShortcutSet = getPhraseShortcut() === 'Control+Alt+Space';
+
   // 编辑后更新同一条历史的正文（不改 id / duration_ms / created_at）。
   // 返回值必须诚实：命中 true、id 不存在 false（旧实现无条件返回 undefined，
   // IPC 层再硬编码 true，写没写到都报成功）。
@@ -174,11 +179,12 @@ export async function runStoreSelftest() {
     okMigrateMiss && okMigrateHit && okMigrateIdem &&
     okMigrateBackfill && okMigrateList && okMigrateBackfillIdem &&
     okShortcutDefault && okShortcutSet && okShortcutOverwrite &&
+    okPhraseShortcutDefault && okPhraseShortcutSet &&
     okUpdateText &&
     okTargetExplicitNull && okTargetFallback && okTargetExplicitId && okTargetNoPending &&
     okPhSave && okPhUpdate && okPhUpdateMiss && okPhUpdateFields &&
     okPhDelMiss && okPhOrderByCreated && okPhTouch && okPhTouchMiss && okPhOrderByUsed &&
     okPhDelete && okPhDeleteGone && okPhraseTableCreated;
-  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem} 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite} 更新正文=${okUpdateText} 采纳目标行=${okTargetExplicitNull && okTargetFallback && okTargetExplicitId && okTargetNoPending} 常用语=${okPhSave && okPhUpdate && okPhUpdateMiss && okPhUpdateFields && okPhDelMiss && okPhOrderByCreated && okPhTouch && okPhTouchMiss && okPhOrderByUsed && okPhDelete && okPhDeleteGone} 常用语建表=${okPhraseTableCreated}`);
+  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem} 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite} 短语快捷键=${okPhraseShortcutDefault && okPhraseShortcutSet} 更新正文=${okUpdateText} 采纳目标行=${okTargetExplicitNull && okTargetFallback && okTargetExplicitId && okTargetNoPending} 常用语=${okPhSave && okPhUpdate && okPhUpdateMiss && okPhUpdateFields && okPhDelMiss && okPhOrderByCreated && okPhTouch && okPhTouchMiss && okPhOrderByUsed && okPhDelete && okPhDeleteGone} 常用语建表=${okPhraseTableCreated}`);
   return { ok };
 }

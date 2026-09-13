@@ -8,10 +8,10 @@ import { createStudioWindow, getStudioWindow } from './studio.js';
 import { getOnboardingWindow } from './onboarding.js';
 import { getKeyEntryWindow } from './key-entry.js';
 import { saveCredentials } from './asr/config.js';
-import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, updateHistoryText, deleteHistory, getShortcut, setShortcut, resolvePolishTarget } from './store.js';
+import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, updateHistoryText, deleteHistory, getShortcut, setShortcut, getPhraseShortcut, setPhraseShortcut, resolvePolishTarget, savePhrase, listPhrases, updatePhrase, deletePhrase, touchPhrase } from './store.js';
 import { streamPolish } from './llm/polish.js';
-import { applyShortcut, currentAccel, defaultAccel, setShortcutSuspended } from './shortcut.js';
-import { pasteTo } from './inject/index.js';
+import { applyShortcut, currentAccel, defaultAccel, defaultPhraseAccel, setShortcutSuspended } from './shortcut.js';
+import { pasteTo, activateTarget } from './inject/index.js';
 
 /**
  * 所有 IPC 的注册点。main.js 只管应用外壳（窗口、托盘、快捷键、生命周期），
@@ -66,6 +66,15 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
       // 就会让下一段空文本继承上一段的高窗（见 main.js resetBarHeight）。listening/
       // draining 会长文本、reviewing 要放编辑区，都不复位。
       if (payload?.state === 'idle' || payload?.state === 'warming') resetBarHeight();
+
+      // phrases 态**主动抢焦点**（唯一一处）。选择器的全部价值就是键盘输入，
+      // 而窗口从 focusable:false 翻成 true 只是「允许被点击」，并不会真的激活；
+      // 不调 focus() 的话搜索框收不到按键，搜索与 ↑↓ 全废。
+      // reviewing **不在此列** —— 它从不主动 focus（见本函数开头那段注释）。
+      if (payload?.state === 'phrases') {
+        bar.focus();
+        bar.webContents.focus();
+      }
     }
     bar.webContents.send(channel, payload);
   };
@@ -80,13 +89,31 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     }
   }
 
-  const machine = new SessionMachine({ emit });
+  const machine = new SessionMachine({
+    emit,
+    activateTarget,
+    // 归还焦点的闸门：只有条确实持有焦点时才还 —— 用户可能在看结果时点开了
+    // 别的应用，无条件置前会把焦点从他刚切过去的地方硬拽回来（spec §1.4）。
+    shouldRestoreFocus: () => getBar()?.isFocused() ?? false,
+  });
 
   // ---------------------------------------------------------------- 会话
 
   /** 快捷键与界面按钮共用：五态下语义不同，由状态机决定。 */
   ipcMain.handle('vp:session/toggle', async () => {
     await machine.toggle();
+    return machine.getSnapshot();
+  });
+
+  /** 第二个快捷键与选择器内 Esc 共用：phrases 态下语义是「关掉选择器」。 */
+  ipcMain.handle('vp:session/toggle-phrases', async () => {
+    await machine.openPhrases();
+    return machine.getSnapshot();
+  });
+
+  /** 选中一条常用语：切到 reviewing。正文归渲染进程所有，不经这里转发。 */
+  ipcMain.handle('vp:session/use-phrase', async () => {
+    await machine.usePhrase();
     return machine.getSnapshot();
   });
 
@@ -296,6 +323,21 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     return true;
   });
 
+  /** 读常用语快捷键。与 vp:shortcut/get 同形状，另一个槽位。 */
+  ipcMain.handle('vp:shortcut/get-phrase', () => {
+    const custom = getPhraseShortcut();
+    return { accel: custom ?? defaultPhraseAccel(), isDefault: custom == null };
+  });
+
+  /** 设常用语快捷键。冲突（含与主快捷键撞车）时 ok:false 且不生效。 */
+  ipcMain.handle('vp:shortcut/set-phrase', (_e, accel) => {
+    const next = String(accel ?? '').trim();
+    if (!next) return { ok: false, accel: currentAccel('phrases') };
+    const ok = applyShortcut(machine, next, 'phrases');
+    if (ok) setPhraseShortcut(next);
+    return { ok, accel: currentAccel('phrases') };
+  });
+
   /** 界面自测跑完：把成败变成进程退出码，便于脚本/CI 判断。 */
   ipcMain.on('vp:uitest-result', (_e, r) => {
     console.log(`[界面自测] ${r.ok ? '全部通过' : `失败 ${r.failed}/${r.total} 项`}`);
@@ -487,6 +529,26 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     getKeyEntryWindow()?.close();
     return true;
   });
+
+  // ---------------------------------------------------------------- 常用语
+
+  /** 列表按「最近使用优先」，与选择器的排序一致。 */
+  ipcMain.handle('vp:phrases/list', () => listPhrases({ limit: 200 }));
+
+  ipcMain.handle('vp:phrases/save', (_e, { title, text }) =>
+    savePhrase({ title: String(title ?? ''), text: String(text ?? '') })
+  );
+
+  ipcMain.handle('vp:phrases/update', (_e, { id, title, text }) => {
+    const n = Number(id);
+    if (!Number.isFinite(n)) return false;
+    return updatePhrase(n, { title: String(title ?? ''), text: String(text ?? '') });
+  });
+
+  ipcMain.handle('vp:phrases/delete', (_e, id) => deletePhrase(Number(id)));
+
+  /** 被选中一次。渲染进程不 await 它（失败只影响排序）。 */
+  ipcMain.handle('vp:phrases/touch', (_e, id) => touchPhrase(Number(id)));
 
   // ---------------------------------------------------------------- 语言（i18n）
 

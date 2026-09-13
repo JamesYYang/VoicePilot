@@ -327,3 +327,15 @@ export function getShortcut() {
 export function setShortcut(accel) {
   setMeta(SHORTCUT_KEY, String(accel));
 }
+
+const PHRASE_SHORTCUT_KEY = 'phrase_shortcut';
+
+/** 用户自定义的常用语快捷键。未设置返回 null，调用方用默认值。 */
+export function getPhraseShortcut() {
+  const v = getMeta(PHRASE_SHORTCUT_KEY);
+  return v && v.trim() ? v : null;
+}
+
+export function setPhraseShortcut(accel) {
+  setMeta(PHRASE_SHORTCUT_KEY, String(accel));
+}

@@ -9,9 +9,21 @@ interface Preset {
 }
 
 interface SessionSnapshot {
-  state: 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing';
+  state: 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing' | 'phrases';
   notice: { kind: string; message: string; attempt: number; maxAttempts: number } | null;
   truncated: boolean;
+  /** 本次 reviewing 的文本从哪来。常用语不落历史就靠它判（spec §2.3）。 */
+  origin: 'dictation' | 'phrase';
+}
+
+/** 一条常用语。字段名与 store.js 的 SELECT 一致。 */
+interface PhraseRow {
+  id: number;
+  title: string;
+  text: string;
+  created_at: number;
+  updated_at: number;
+  used_at: number | null;
 }
 
 interface HistoryRow {
@@ -43,6 +55,26 @@ interface VoicePilotBridge {
   toggle(): Promise<SessionSnapshot>;
   /** 拉一次当前状态（渲染进程启动时可能错过了广播） */
   syncState(): Promise<SessionSnapshot>;
+  /** 第二个快捷键与选择器内 Esc 共用：phrases 态下语义是「关掉选择器」 */
+  togglePhrases(): Promise<SessionSnapshot>;
+  /** 选中一条常用语：切到 reviewing */
+  usePhrase(): Promise<SessionSnapshot>;
+
+  // —— 常用语 ——
+  /** 常用语列表（最近使用优先） */
+  phrasesList(): Promise<PhraseRow[]>;
+  /** 存一条常用语，返回 {id} */
+  phrasesSave(payload: { title: string; text: string }): Promise<{ id: number }>;
+  /** 改标题/正文，返回是否命中一行 */
+  phrasesUpdate(payload: { id: number; title: string; text: string }): Promise<boolean>;
+  /** 删一条，返回是否真的删掉了 */
+  phrasesDelete(id: number): Promise<boolean>;
+  /** 记一次被选中（驱动「最近使用优先」）。调用方不该 await */
+  phrasesTouch(id: number): Promise<boolean>;
+  /** 读常用语快捷键。isDefault 表示未自定义 */
+  getPhraseShortcut(): Promise<{ accel: string; isDefault: boolean }>;
+  /** 设常用语快捷键。冲突时 ok:false 且不生效 */
+  setPhraseShortcut(accel: string): Promise<{ ok: boolean; accel: string }>;
   /** 采集失败上报：只有渲染进程知道 getUserMedia 为什么失败 */
   captureFailed(message: string): void;
   /** 音频帧上行。meta = {seq, cumSamples}，pcm 是原始字节 */

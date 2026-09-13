@@ -63,6 +63,16 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:state/sync');
   },
 
+  /** 第二个快捷键与选择器内 Esc 共用：phrases 态下语义是「关掉选择器」。 */
+  togglePhrases() {
+    return ipcRenderer.invoke('vp:session/toggle-phrases');
+  },
+
+  /** 选中一条常用语：切到 reviewing。正文由渲染进程自己灌进编辑区。 */
+  usePhrase() {
+    return ipcRenderer.invoke('vp:session/use-phrase');
+  },
+
   /** 采集失败上报（麦克风被占用 / 未授权）。只有渲染进程知道原因。 */
   captureFailed(message) {
     ipcRenderer.send('vp:session/capture-failed', message);
@@ -275,6 +285,31 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:key/close');
   },
 
+  /** 常用语列表（最近使用优先）。 */
+  phrasesList() {
+    return ipcRenderer.invoke('vp:phrases/list');
+  },
+
+  /** 存一条常用语。返回 {id}。 */
+  phrasesSave(payload) {
+    return ipcRenderer.invoke('vp:phrases/save', payload);
+  },
+
+  /** 改标题/正文。返回是否命中一行。 */
+  phrasesUpdate(payload) {
+    return ipcRenderer.invoke('vp:phrases/update', payload);
+  },
+
+  /** 删一条。返回是否真的删掉了。 */
+  phrasesDelete(id) {
+    return ipcRenderer.invoke('vp:phrases/delete', id);
+  },
+
+  /** 记一次被选中（驱动「最近使用优先」）。调用方不该 await。 */
+  phrasesTouch(id) {
+    return ipcRenderer.invoke('vp:phrases/touch', id);
+  },
+
   // ---------------------------------------------------------------- 快捷键（F7）
 
   /** 读当前快捷键 { accel, isDefault }。 */
@@ -285,6 +320,16 @@ contextBridge.exposeInMainWorld('voicepilot', {
   /** 设置快捷键。冲突时返回 { ok:false } 且不生效。 */
   setShortcut(accel) {
     return ipcRenderer.invoke('vp:shortcut/set', accel);
+  },
+
+  /** 读常用语快捷键 { accel, isDefault }。 */
+  getPhraseShortcut() {
+    return ipcRenderer.invoke('vp:shortcut/get-phrase');
+  },
+
+  /** 设置常用语快捷键。冲突时返回 { ok:false } 且不生效。 */
+  setPhraseShortcut(accel) {
+    return ipcRenderer.invoke('vp:shortcut/set-phrase', accel);
   },
 
   /** 录制期间挂起 / 恢复全局快捷键，避免按下的组合键触发一次听写。 */

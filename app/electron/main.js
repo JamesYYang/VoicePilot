@@ -503,13 +503,16 @@ app.whenReady().then(async () => {
 
   createBar();
   createTray();
-  // 启动注册快捷键：store 里的值可能损坏（非法 accelerator 会让 register 抛异常）。
-  // 绝不能让异常冒泡 —— 它后面还有凭据、引导窗等启动步骤，抛出去就全被跳过。
+  // 启动注册两个快捷键：store 里的值可能损坏（非法 accelerator 会让 register 抛异常）。
+  // 绝不能让异常冒泡 —— 后面还有凭据、引导窗等启动步骤，抛出去就全被跳过。
   // applyShortcut 内部已 try/catch，这里再兜一层，纯粹为了启动序列万无一失。
-  try {
-    applyShortcut(machine, currentAccel());
-  } catch (e) {
-    console.error(`[快捷键] 启动注册失败：${e?.message ?? e}`);
+  // 短语键注册失败只打日志（spec §0.2 的已知代价）：用户可在设置页重录时看到冲突提示。
+  for (const slot of ['main', 'phrases']) {
+    try {
+      applyShortcut(machine, currentAccel(slot), slot);
+    } catch (e) {
+      console.error(`[快捷键] ${slot} 启动注册失败：${e?.message ?? e}`);
+    }
   }
 
   // 凭据来源：.env（仅开发）→ 本地缓存 → 内网端点。开发期有 .env 时上面两步都不碰端点。
