@@ -5,7 +5,7 @@ import { LatencyMetrics, formatSummary } from '../telemetry/metrics.js';
 import { t } from '../../shared/i18n/index.js';
 import { getCurrentLocale } from '../locale.js';
 import { toTraditional } from '../i18n/zh-convert.js';
-import { captureTarget as defaultCaptureTarget } from '../inject/index.js';
+import { captureTarget as defaultCaptureTarget, activateTarget as defaultActivateTarget } from '../inject/index.js';
 
 /**
  * 听写会话状态机（PRD §4.1）。跑在主进程，是唯一的状态源；渲染进程只负责显示。
@@ -15,6 +15,9 @@ import { captureTarget as defaultCaptureTarget } from '../inject/index.js';
  *                    再按一次取消                               task-finished / 20s 超时
  *                        ▼                                              ▼
  *                       idle                                        reviewing ──复制/关闭──▶ idle
+ *
+ *   另有 phrases（常用语选择器）一态，由第二个快捷键进出：idle ──短语键──▶ phrases
+ *   ──选中──▶ reviewing（目标窗口一路保留）。它不启动 ASR 会话，见 openPhrases。
  *
  * 几个刻意的取舍：
  *
@@ -42,9 +45,12 @@ const MAX_ATTEMPTS = 3;
  *
  * 抽成纯函数是为了让它有回归断言（见 selftest/machine.js）：ipc.js 里对
  * setFocusable 的调用肉眼看不见，删掉也没任何测试会红。
+ *
+ * `phrases` 是 spec 2026-09-13 §1.3 的**有意破例**：选择器的全部价值就是键盘输入，
+ * 而用户是主动按了快捷键才进来的，不存在「被抢焦点」。
  */
 export function isBarFocusable(state) {
-  return state === 'reviewing';
+  return state === 'reviewing' || state === 'phrases';
 }
 
 export class SessionMachine {
@@ -66,6 +72,9 @@ export class SessionMachine {
   #fixedCreds = null;
   #captureTarget;
   #target = null;
+  #origin = 'dictation';
+  #activateTarget;
+  #shouldRestoreFocus;
 
   /**
    * @param emit          向渲染进程推送
@@ -82,6 +91,8 @@ export class SessionMachine {
     createSession,
     credentials,
     captureTarget,
+    activateTarget,
+    shouldRestoreFocus,
   }) {
     this.#emit = emit;
     this.maxAttempts = maxAttempts;
@@ -92,6 +103,11 @@ export class SessionMachine {
     // 与 createSession 同一个注入手法：生产用真实现，自测注入假的。
     // 不把平台代码写进状态机 —— 这里只认「一个返回 Target|null 的函数」。
     this.#captureTarget = captureTarget ?? defaultCaptureTarget;
+    this.#activateTarget = activateTarget ?? defaultActivateTarget;
+    // 默认**永不**归还焦点：没被显式注入时不做这件事，比做错更安全。
+    // 生产由 ipc.js 注入 () => getBar()?.isFocused() ?? false（spec §1.4 的闸门）。
+    // 与 captureTarget 同一个注入手法：状态机不认识 BrowserWindow。
+    this.#shouldRestoreFocus = shouldRestoreFocus ?? (() => false);
   }
 
   get state() {
@@ -105,7 +121,7 @@ export class SessionMachine {
 
   /** 渲染进程挂载时拉一次当前状态，避免错过它启动之前的那次状态广播。 */
   getSnapshot() {
-    return { state: this.#state, notice: this.#notice, truncated: this.#truncated };
+    return { state: this.#state, notice: this.#notice, truncated: this.#truncated, origin: this.#origin };
   }
 
   /** 快捷键触发那一刻的前台窗口。采纳时用它作为写回目标。 */
@@ -126,6 +142,63 @@ export class SessionMachine {
     return { ignored: true };
   }
 
+  // ------------------------------------------------------------ 常用语选择器
+
+  /**
+   * 第二个全局快捷键。语义与 toggle 同款：在 idle 开选择器，在 phrases 关掉它。
+   * 其余四态**一律忽略** —— warming/listening/draining 正在录音或收尾，切走会丢
+   * 掉这段听写；reviewing 里已经躺着一段结果，弹选择器会把它顶掉。
+   * 宁可「按了没反应」，也不要静默毁掉用户已有的内容（spec §1.2）。
+   */
+  async openPhrases() {
+    if (this.#state === 'phrases') return this.#closePhrases();
+    if (this.#state !== 'idle') return { ignored: true };
+
+    // 与 start() 同款：必须在条获得焦点**之前**捕获，那之后前台就变成我们自己了。
+    this.#target = this.#captureTarget();
+    this.#setState('phrases');
+    return { ok: true };
+  }
+
+  /**
+   * 选中一条常用语：phrases → reviewing。**目标窗口保留**（采纳还要用它）。
+   * 正文由渲染进程持有并灌进编辑区 —— 这里只负责状态事实（文本归渲染进程所有）。
+   */
+  async usePhrase() {
+    if (this.#state !== 'phrases') return { ignored: true };
+    this.#origin = 'phrase';
+    this.#setState('reviewing');
+    return { ok: true };
+  }
+
+  /** 关掉选择器：回 idle，并把焦点还给用户原来的应用。 */
+  async #closePhrases() {
+    const target = this.#target;
+    this.#target = null;
+    this.#origin = 'dictation';
+    // **顺序是安全属性**：先回 idle，让 emit 里的 setFocusable(false) 与
+    // resetBarHeight() 全部落地，再置前。反过来的话，那两下 frame change / 尺寸
+    // 复位会把刚建立的激活扰动走 —— 这正是 Plan 2B 真机排障的结论（spec §1.4）。
+    this.#setState('idle');
+    await this.#restoreFocus(target);
+    return { ok: true };
+  }
+
+  /**
+   * 把前台还给 target。失败静默（用户按 Esc 就是想走，此刻弹错误是打扰）。
+   * 闸门在调用方：只有「我们确实还拿着焦点」时才归还。
+   */
+  async #restoreFocus(target) {
+    if (!target) return;
+    if (!this.#shouldRestoreFocus()) return;
+    try {
+      const r = await this.#activateTarget(target);
+      if (!r?.ok) console.warn(`[常用语] 归还焦点失败：${r?.reason ?? 'unknown'}`);
+    } catch (e) {
+      console.warn(`[常用语] 归还焦点异常：${e?.message ?? e}`);
+    }
+  }
+
   async start() {
     try {
       this.#creds = this.#fixedCreds ?? loadCredentials();
@@ -140,6 +213,7 @@ export class SessionMachine {
     this.#metrics.markToggle();
     this.#attempt = 0;
     this.#truncated = false;
+    this.#origin = 'dictation';
     this.#notice = null;
     this.#lastDurationMs = null;
     this.#queue.clear();
@@ -156,7 +230,8 @@ export class SessionMachine {
 
   /** 渲染进程送来的音频帧。无论当前处于哪个状态都收 —— warming 期间靠它缓冲。 */
   onAudioFrame({ seq, cumSamples }, pcm) {
-    if (this.#state === 'idle' || this.#state === 'reviewing') return;
+    // phrases 也要挡：选择器态渲染进程本来就不采集，但状态机不该依赖调用方的自觉。
+    if (this.#state === 'idle' || this.#state === 'reviewing' || this.#state === 'phrases') return;
     this.#queue.push({ seq, cumSamples, pcm: Buffer.from(pcm) });
     // 立刻尝试发送，别等下一次轮询
     this.#pump();
@@ -262,10 +337,18 @@ export class SessionMachine {
     }
   }
 
-  #dismiss() {
+  async #dismiss() {
+    const target = this.#target;
+    // 只有「从常用语来的 reviewing」需要归还：那条路的焦点是我们主动拿的
+    // （见 openPhrases 与 ipc.js 的 focus()）。听写一路的焦点从来不是我们拿的，
+    // 且用户可能中途点开了别的应用 —— 无条件置前会把焦点从他刚切过去的地方拽回来。
+    const fromPhrase = this.#origin === 'phrase';
+
     this.#queue.clear();
     this.#target = null;
+    this.#origin = 'dictation';
     this.#setState('idle');
+    if (fromPhrase) await this.#restoreFocus(target);
   }
 
   // ------------------------------------------------------------ 错误处理

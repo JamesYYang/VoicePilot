@@ -256,6 +256,7 @@ async function testBarFocusable() {
   check('warming 不可聚焦（A2 硬约束）', isBarFocusable('warming') === false);
   check('listening 不可聚焦（A2 硬约束）', isBarFocusable('listening') === false);
   check('draining 不可聚焦（A2 硬约束）', isBarFocusable('draining') === false);
+  check('phrases 可聚焦（选择器需要键盘输入）', isBarFocusable('phrases') === true);
 }
 
 // ---------------------------------------------------------------- 采纳目标窗口
@@ -321,6 +322,134 @@ async function testCaptureTarget() {
   check('dismiss 后清空目标', m2.getTarget() === null, JSON.stringify(m2.getTarget()));
 }
 
+// ---------------------------------------------------------------- 常用语选择器
+
+/**
+ * 第六态 phrases：捕获时机、状态门禁、origin、以及焦点归还的顺序与闸门。
+ * 真实的 focus() 与置前没法自动验（spec §6 风险 1/3），这里验的是**编排**。
+ */
+async function testPhrases() {
+  console.log('\n[9] 常用语选择器：捕获时机 / 状态门禁 / origin / 焦点归还');
+
+  const mk = (opts = {}) => {
+    FakeSession.all = []; // 每个用例从零开始数会话，否则「不建会话」的断言数不准
+    const calls = { capture: 0, activate: 0 };
+    const activated = [];
+    const stateAtActivate = []; // 置前那一刻的状态：用来锁住「先回 idle 再置前」的顺序
+    let restore = opts.shouldRestoreFocus ?? true;
+    const holder = {};
+    const m = new SessionMachine({
+      emit() {},
+      credentials: {},
+      createSession: () => new FakeSession({}),
+      captureTarget: () => {
+        calls.capture += 1;
+        return { kind: 'win', hwnd: 5 };
+      },
+      activateTarget: async (t) => {
+        calls.activate += 1;
+        activated.push(t);
+        stateAtActivate.push(holder.m.state);
+        return { ok: true };
+      },
+      shouldRestoreFocus: () => restore,
+    });
+    holder.m = m;
+    return { m, calls, activated, stateAtActivate };
+  };
+
+  // ---- 捕获发生在进 phrases 之前，且只捕获一次 ----
+  const a = mk();
+  await a.m.openPhrases();
+  check('openPhrases 进 phrases 态', a.m.state === 'phrases', a.m.state);
+  check('捕获一次', a.calls.capture === 1, `${a.calls.capture} 次`);
+  check('进 phrases 前已持有目标', a.m.getTarget() !== null, JSON.stringify(a.m.getTarget()));
+
+  // ---- 非 idle 态一律忽略 ----
+  const b = mk();
+  await b.m.start();
+  check('listening 下 openPhrases 被忽略',
+    (await b.m.openPhrases()).ignored === true && b.m.state === 'listening', b.m.state);
+
+  // 主快捷键在 phrases 态同样忽略（不串「关掉并开始听写」两个跃迁）
+  const c = mk();
+  await c.m.openPhrases();
+  await c.m.toggle();
+  check('主快捷键在 phrases 态被忽略', c.m.state === 'phrases', c.m.state);
+
+  // ---- usePhrase：origin 翻成 phrase，目标保留 ----
+  const d = mk();
+  await d.m.openPhrases();
+  await d.m.usePhrase();
+  check('usePhrase 进 reviewing', d.m.state === 'reviewing', d.m.state);
+  check('origin 翻成 phrase', d.m.getSnapshot().origin === 'phrase', d.m.getSnapshot().origin);
+  check('reviewing 期目标仍持有（采纳要用）', d.m.getTarget() !== null, JSON.stringify(d.m.getTarget()));
+
+  // ---- 关掉选择器：回 idle、清空目标、归还焦点 ----
+  const e = mk();
+  await e.m.openPhrases();
+  await e.m.openPhrases(); // 再按一次 = 关闭
+  check('再按一次回到 idle', e.m.state === 'idle', e.m.state);
+  check('关闭后清空目标', e.m.getTarget() === null, JSON.stringify(e.m.getTarget()));
+  check('关闭时归还焦点一次', e.calls.activate === 1, `${e.calls.activate} 次`);
+  check('归还的是捕获到的那个目标',
+    JSON.stringify(e.activated[0]) === JSON.stringify({ kind: 'win', hwnd: 5 }),
+    JSON.stringify(e.activated[0]));
+  // 顺序是安全属性：置前必须发生在回 idle（= setFocusable(false) / resetBarHeight 落地）
+  // **之后**，否则那两下改动会把刚建立的激活扰动走。这条断言专门锁住顺序 ——
+  // 只数次数的话，把 await 提到 setState 之前也是绿的，等于没测。
+  check('归还发生在回 idle 之后（顺序是安全属性）',
+    e.stateAtActivate[0] === 'idle', String(e.stateAtActivate[0]));
+
+  // ---- 闸门：条不持有焦点时不归还（避免把焦点从用户刚切过去的应用拽回来）----
+  const f = mk({ shouldRestoreFocus: false });
+  await f.m.openPhrases();
+  await f.m.openPhrases();
+  check('闸门为 false 时不置前', f.calls.activate === 0, `${f.calls.activate} 次`);
+
+  // ---- 从常用语来的 reviewing 关闭时同样归还；听写来的不归还 ----
+  const g = mk();
+  await g.m.openPhrases();
+  await g.m.usePhrase();
+  await g.m.toggle(); // reviewing → dismiss
+  check('从常用语来的 reviewing 关闭时归还焦点', g.calls.activate === 1, `${g.calls.activate} 次`);
+  check('关闭后 origin 复位 dictation',
+    g.m.getSnapshot().origin === 'dictation', g.m.getSnapshot().origin);
+  check('dismiss 路径同样先回 idle 再置前', g.stateAtActivate[0] === 'idle', String(g.stateAtActivate[0]));
+
+  const h = mk();
+  await h.m.start();
+  await h.m.toggle(); // → reviewing（origin 仍是 dictation）
+  check('听写来的 reviewing origin=dictation',
+    h.m.getSnapshot().origin === 'dictation', h.m.getSnapshot().origin);
+  await h.m.toggle(); // dismiss
+  check('听写来的 reviewing 关闭时不置前（既有行为不变）',
+    h.calls.activate === 0, `${h.calls.activate} 次`);
+
+  // ---- start() 把 origin 重置回 dictation ----
+  const i = mk();
+  await i.m.openPhrases();
+  await i.m.usePhrase();
+  check('用例前置：此时 origin=phrase', i.m.getSnapshot().origin === 'phrase');
+  await i.m.toggle(); // dismiss → idle
+  await i.m.start();
+  check('start() 重置 origin=dictation',
+    i.m.getSnapshot().origin === 'dictation', i.m.getSnapshot().origin);
+
+  // ---- phrases 态不建会话、不入音频队列（不产生识别费用）----
+  // 断言必须落在**会话数量**上。原先写的「state 仍是 phrases」是个恒真断言：
+  // onAudioFrame 就算不早退，state 也不会变，那条断言永远绿、什么也没测。
+  // mk() 每次都会把 FakeSession.all 清空，所以这里的 0 是真实的。
+  const j = mk();
+  await j.m.openPhrases();
+  check('phrases 态不建 ASR 会话（没有会话就没有识别费用）',
+    FakeSession.all.length === 0, `${FakeSession.all.length} 个会话`);
+  j.m.onAudioFrame({ seq: 1, cumSamples: 1600 }, Buffer.alloc(3200));
+  check('phrases 态收到音频帧也不建会话、不抛',
+    FakeSession.all.length === 0 && j.m.state === 'phrases',
+    `${FakeSession.all.length} 个会话 / ${j.m.state}`);
+}
+
 export async function runMachineSelftest() {
   console.log('=== 状态机与背压自测 ===');
 
@@ -332,6 +461,7 @@ export async function runMachineSelftest() {
   await testBackpressure();
   await testBarFocusable();
   await testCaptureTarget();
+  await testPhrases();
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
