@@ -1222,15 +1222,9 @@ import { applyShortcut, boundShortcut, defaultAccel, defaultPhraseAccel, setShor
 
 `app/src/global.d.ts`：
 
-```ts
-interface SessionSnapshot {
-  state: 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing' | 'phrases';
-  notice: { kind: string; message: string; attempt: number; maxAttempts: number } | null;
-  truncated: boolean;
-  /** 本次 reviewing 的文本从哪来。常用语不落历史就靠它判（spec §2.3）。 */
-  origin: 'dictation' | 'phrase';
-}
+**只加下面这段**（新增类型，没有既有消费者，加它不会弄红任何东西）：
 
+```ts
 /** 一条常用语。字段名与 store.js 的 SELECT 一致。 */
 interface PhraseRow {
   id: number;
@@ -1241,6 +1235,10 @@ interface PhraseRow {
   used_at: number | null;
 }
 ```
+
+> ⚠️ **`SessionSnapshot` 的改动不在本 Task，而在 Task 6。** 原因是它约束了任务的边界：`SessionSnapshot` 被**两处渲染层文件平行镜像**（`app/src/App.tsx` 的本地 `SessionState`/`Snapshot`，以及 `app/src/uitest/run.tsx` 里 16 处 `fire('state',…)` 字面量）。本 Task 一旦给它加必填的 `origin`，那 20 处立刻变红，而那两个文件是 Task 6 的范围 —— 结果是本 Task 交付时 `npm run typecheck` 必然不干净，与 Global Constraints 直接冲突。
+>
+> 桥声明的返回类型**不需要**跟着改：`preload.cjs` 的实现是 `ipcRenderer.invoke(...)`（返回 `Promise<any>`），`global.d.ts` 只是声明、不参与实现的可赋值性检查。所以本 Task 声明 `togglePhrases(): Promise<SessionSnapshot>` 时用**当前**的 `SessionSnapshot`（还没有 `origin`）完全成立，TypeScript 不会对任何东西报错。
 
 `VoicePilotBridge` 加：
 
@@ -1280,10 +1278,12 @@ interface PhraseRow {
 
 - [ ] **Step 8: 跑测试**
 
-Run: `cd app && npm run typecheck && VP_STORE_SELFTEST=1 npx electron . && VP_SHORTCUT_SELFTEST=1 npx electron . && VP_SM_SELFTEST=1 npx electron . && VP_I18N_SELFTEST=1 npx electron .`
-Expected: 四项全 `通过`、退出码 0；typecheck 干净。
+Run: `cd app && npm run typecheck && VP_STORE_SELFTEST=1 npx electron . && VP_SHORTCUT_SELFTEST=1 npx electron . && VP_SM_SELFTEST=1 npx electron . && VP_I18N_SELFTEST=1 npx electron . && npm run build && VP_UI_SELFTEST=1 npx electron .`
+Expected: **五项全 `通过`、退出码全 0；typecheck 干净。**
 
-**`VP_UI_SELFTEST` 此处会红** —— `app/src/uitest/run.tsx` 里的 `fire('state', …)` 还缺 `origin` 字段。那是 Task 6 的 Step 6，本 Task 不跑界面自测。
+界面自测也要跑，而且应当**绿**：本 Task 没改任何渲染层文件，`SessionSnapshot` 也**没有**加 `origin`（见 Step 7 的说明），所以 `run.tsx` 与 `App.tsx` 既不用改、也不应红。新增的桥方法对那两棵测试树无影响（`...real` 在类型上已提供全部方法，运行时也没人调它们）。
+
+**如果这里界面自测红了**，说明改动溢出了主进程范围 —— 回去查，不要靠改测试掩盖。
 
 - [ ] **Step 9: 提交**
 
@@ -1351,7 +1351,23 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, Ref } from 're
 type SessionState = 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing' | 'phrases';
 ```
 
-(c) 本地 `Snapshot` 加 `origin`：
+(c) `Snapshot` 加 `origin` —— **两处一起改，它们必须同步**：
+
+先改共享声明 `app/src/global.d.ts`：
+
+```ts
+interface SessionSnapshot {
+  state: 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing' | 'phrases';
+  notice: { kind: string; message: string; attempt: number; maxAttempts: number } | null;
+  truncated: boolean;
+  /** 本次 reviewing 的文本从哪来。常用语不落历史就靠它判（spec §2.3）。 */
+  origin: 'dictation' | 'phrase';
+}
+```
+
+> 这条改动是 Task 5 有意推迟到本 Task 的：它一落地，`App.tsx` 的本地镜像与 `run.tsx` 里 16 处 `fire('state',…)` 字面量会同时变红，而那些正是本 Task 要改的文件 —— 放在同一个 Task 里才能保证任何一次提交树都是干净的。
+
+再改 `app/src/App.tsx` 的本地镜像（它 mirror 上面那个类型，`state` 联合与 `origin` 都要跟上）：
 
 ```tsx
 interface Snapshot {
