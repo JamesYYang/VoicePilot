@@ -325,8 +325,9 @@ async function testCaptureTarget() {
 // ---------------------------------------------------------------- 常用语选择器
 
 /**
- * 第六态 phrases：捕获时机、状态门禁、origin、以及焦点归还的顺序与闸门。
- * 真实的 focus() 与置前没法自动验（spec §6 风险 1/3），这里验的是**编排**。
+ * 第六态 phrases：捕获时机、状态门禁、origin、以及焦点归还的顺序与闸门取样时机。
+ * 真实的 focus() 与置前没法自动验（spec §6 风险 1/3），这里验的是**编排**：
+ * 置前必须在拆状态之后，而闸门必须在拆状态之前 —— 两处顺序都是安全属性。
  */
 async function testPhrases() {
   console.log('\n[9] 常用语选择器：捕获时机 / 状态门禁 / origin / 焦点归还');
@@ -336,6 +337,7 @@ async function testPhrases() {
     const calls = { capture: 0, activate: 0 };
     const activated = [];
     const stateAtActivate = []; // 置前那一刻的状态：用来锁住「先回 idle 再置前」的顺序
+    const stateAtGate = []; // 读闸门那一刻的状态：用来锁住「先取样闸门再拆状态」的顺序
     let restore = opts.shouldRestoreFocus ?? true;
     const holder = {};
     const m = new SessionMachine({
@@ -352,10 +354,13 @@ async function testPhrases() {
         stateAtActivate.push(holder.m.state);
         return { ok: true };
       },
-      shouldRestoreFocus: () => restore,
+      shouldRestoreFocus: () => {
+        stateAtGate.push(holder.m.state);
+        return restore;
+      },
     });
     holder.m = m;
-    return { m, calls, activated, stateAtActivate };
+    return { m, calls, activated, stateAtActivate, stateAtGate };
   };
 
   // ---- 捕获发生在进 phrases 之前，且只捕获一次 ----
@@ -400,6 +405,11 @@ async function testPhrases() {
   // 只数次数的话，把 await 提到 setState 之前也是绿的，等于没测。
   check('归还发生在回 idle 之后（顺序是安全属性）',
     e.stateAtActivate[0] === 'idle', String(e.stateAtActivate[0]));
+  // 闸门与置前的顺序恰好相反，同样是安全属性：回 idle 会 setFocusable(false)，
+  // 不可聚焦的窗口随即失去焦点，事后再读闸门只会拿到 false —— 归还静默从不发生。
+  // 生产里这个谓词是 () => bar.isFocused()，不是固定值，所以单测必须钉住读取时机。
+  check('闸门在回 idle 之前取样（否则永远读到 false）',
+    e.stateAtGate[0] === 'phrases', String(e.stateAtGate[0]));
 
   // ---- 闸门：条不持有焦点时不归还（避免把焦点从用户刚切过去的应用拽回来）----
   const f = mk({ shouldRestoreFocus: false });
@@ -416,6 +426,9 @@ async function testPhrases() {
   check('关闭后 origin 复位 dictation',
     g.m.getSnapshot().origin === 'dictation', g.m.getSnapshot().origin);
   check('dismiss 路径同样先回 idle 再置前', g.stateAtActivate[0] === 'idle', String(g.stateAtActivate[0]));
+  // 同理：dismiss 路的闸门也得在 #setState('idle') 之前读，此时还停在 reviewing。
+  check('dismiss 路径的闸门在回 idle 之前取样（此时仍在 reviewing）',
+    g.stateAtGate[0] === 'reviewing', String(g.stateAtGate[0]));
 
   const h = mk();
   await h.m.start();
