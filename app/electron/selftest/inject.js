@@ -145,6 +145,13 @@ export async function runInjectSelftest() {
   check('平台不匹配的目标被拒绝，且 reason 精确为 no-target',
     wrongKind?.reason === 'no-target', JSON.stringify(wrongKind));
 
+  // ---- macOS 路径：Windows 上走不到，但可以验它不会被误调用 ----
+  // 这条是防「index.js 的平台分派写反 / 平台实现忘了守 kind」的护栏。
+  // 断言精确到 reason='no-target'（理由同 Task 3 那条：只看 ok===false 会假绿）。
+  const macShaped = await pasteTo({ kind: 'mac', pid: process.pid, bundleId: null });
+  check('Windows 上拒绝 mac 形状的目标，reason 精确为 no-target',
+    macShaped?.reason === 'no-target', JSON.stringify(macShaped));
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
   for (const f of failed) console.log(`  FAIL ${f.name} ${f.detail}`);
