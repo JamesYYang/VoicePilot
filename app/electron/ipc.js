@@ -178,7 +178,25 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     };
 
     const before = await probeBar('发键前');
+
+    // 先把自己的可聚焦性交出去，再动手置前目标。
+    //
+    // 为什么必须在**置前之前**：用户点「采纳」时悬浮条是可聚焦的（reviewing 态），
+    // 而关闭路径会调 setFocusable(false)，那会触发 SWP_FRAMECHANGED 样式变更。
+    // 在我们自己的窗口上做这种变更，会把激活从目标应用手里扰动走 ——
+    // 发键前扰动，粘贴作废；发键后扰动，粘贴能活但**光标回不到目标**（真机反馈：
+    // 采纳成功后光标不在 Word 里，得点一下才能继续打字）。
+    //
+    // 提前交出去之后，拆条时的这次变更就成了空操作（emit 里 isFocusable 相同则跳过），
+    // 于是没人再去动目标的激活。失败时把可聚焦还回来 —— 用户还要在条里看提示并重试。
+    const bar = getBar();
+    const barAlive = () => bar && !bar.isDestroyed();
+    const hadFocus = barAlive() && bar.isFocusable();
+    if (hadFocus) bar.setFocusable(false);
+
     const r = await pasteTo(machine.getTarget());
+
+    if (!r.ok && hadFocus && barAlive()) bar.setFocusable(true);
 
     // ⚠️ 成功后**不能立刻返回**。
     //
