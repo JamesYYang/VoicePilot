@@ -294,7 +294,6 @@ studio.phrases                  '常用语'          (Studio 导航项)
 phrase.title                    '标题'
 phrase.text                     '内容'
 phrase.listEmpty                '还没有常用语'
-phrase.selectHint               '选中一条常用语查看或编辑'
 phrase.save                     '保存'
 phrase.saved                    '已保存'
 phrase.delete                   '删除'
@@ -304,6 +303,8 @@ settings.phraseShortcut.hint    '按下组合键即可修改唤起常用语的�
 ```
 
 `zh-TW` / `en-US` 各自对应，键集必须一致。
+
+> **2026-09-13 实现评审后删掉 `phrase.selectHint`。** 初稿列了这个 key（「选中一条常用语查看或编辑」），但 §3.3 定的是「详情面板同时承担新建」——空表单就是新建态，于是「未选中」这个详情态根本不存在，这个 key 从未被渲染。三本字典已同步移除，键集仍一致。
 
 ### 3.6 bridge 与类型
 
