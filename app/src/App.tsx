@@ -36,8 +36,8 @@ const BAR_MIN_HEIGHT = 148;
 const BAR_MAX_HEIGHT = 620;
 /** 编辑态编辑区的高度下限：短句时也要给一个舒服的编辑面，不能只剩一行。 */
 const BAR_EDITOR_MIN_HEIGHT = 96;
-/** 根节点上下各 margin:8，scrollHeight/clientHeight 都不含这 16px，须显式补上。 */
-const BAR_MARGINS = 16;
+/** 窗口高 = 根内容区 + 18：上下 margin 8×2 与 border 1×2，两者都不计入 scrollHeight/clientHeight。 */
+const BAR_MARGINS = 18;
 
 type SessionState = 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing';
 
@@ -395,7 +395,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 停止（reviewing）后不自动滚，让用户自由回翻查看。
   const textRef = useRef<HTMLDivElement | HTMLTextAreaElement>(null);
   // 根节点与编辑区：高度 effect 要用「非内容区占用 + 内容需求」来算窗口高度，
-  // 非内容区占用 = root.clientHeight - contentEl.clientHeight。
+  // 非内容区占用 = root.scrollHeight - contentEl.clientHeight。
   const barRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -408,8 +408,9 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
   // 按「非内容区占用 + 内容需求」来算：chrome 是除内容元素外的所有行（头、
   // 场景/语气行、按钮行、提示、润色面板）占的高度，其余行都是 flexShrink:0，
   // 窗口变高时这一差值不变，所以算一遍就收敛，不会来回抖。内容元素在 reviewing
-  // 是编辑区（给一个舒适下限），其余态是只读文本区。旧的「文本区溢出量」模型在
-  // 短句时溢出为负、窗口不生长，编辑区被其余行挤成一行高 —— 故废弃。
+  // 是编辑区（给一个舒适下限），其余态是只读文本区。旧的「文本区溢出量」模型不
+  // 可用：这些盒子都是 overflow:auto，Chromium 只会报 scrollHeight >= clientHeight，
+  // 短句时溢出量是 0 而不是负值，窗口因此从不生长，编辑区被其余行挤成一行高 —— 故废弃。
   useEffect(() => {
     // warming 期间不测：文本刚复位，这一帧量到的是上一轮的残留内容，
     // 会把刚被主进程收回基线高度的窗口重新撑高（见 resetBarHeight）。
@@ -419,12 +420,15 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
     // 内容元素：reviewing 是编辑区，其余态是只读文本区。
     const contentEl = editorRef.current ?? textRef.current;
-    // 非内容区占用 = 根内容高 - 内容元素高。其余行都是 flexShrink:0，
-    // 窗口变高时这一差值不变，所以算一遍就能收敛。
-    const chrome = root.clientHeight - (contentEl?.clientHeight ?? 0);
-    // 编辑区要保住一个舒服的下限，否则短句时只剩一行高。
+    const isEditor = !!editorRef.current;
+    // 非内容区占用 = 根的可滚动内容高 - 内容元素高。
+    // 用 scrollHeight 而不是 clientHeight：内容元素被压到 0（新增的行把空间吃满）时，
+    // clientHeight 会随窗口一起变大、把 chrome 少算一截；scrollHeight 反映的是真实内容高，
+    // 两种情形都对。不饱和时两者相等，行为不变。
+    const chrome = root.scrollHeight - (contentEl?.clientHeight ?? 0);
+    // 编辑区要保住一个舒服的下限，否则短句时只剩一行高；只读文本区按实际内容高。
     const contentNeed = contentEl
-      ? Math.max(contentEl.scrollHeight, editorRef.current ? BAR_EDITOR_MIN_HEIGHT : 0)
+      ? Math.max(contentEl.scrollHeight, isEditor ? BAR_EDITOR_MIN_HEIGHT : 0)
       : 0;
 
     const target = Math.min(
