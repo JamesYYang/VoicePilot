@@ -46,7 +46,8 @@
       "!**/*.map"
     ],
     "asarUnpack": [
-      "node_modules/koffi/**"
+      "node_modules/koffi/**",
+      "node_modules/@koromix/**"
     ],
     "win": {
       "target": ["nsis", "portable"],
