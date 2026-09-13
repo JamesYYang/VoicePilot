@@ -1012,6 +1012,8 @@ import { applyShortcut, boundShortcut, defaultAccel, defaultPhraseAccel, setShor
     defaultPhraseAccel('darwin') === 'Alt+Shift+Space';
 
   const A2 = 'Control+Alt+Shift+F12';
+  // 防御：别让本用例的成败依赖前面几个用例的注册/注销序列。
+  globalShortcut.unregister(C);
   const okPhraseFirst =
     applyShortcut(fakeMachine, A2, 'phrases') === true &&
     globalShortcut.isRegistered(A2) === true &&
@@ -1035,7 +1037,7 @@ import { applyShortcut, boundShortcut, defaultAccel, defaultPhraseAccel, setShor
 
 把它们并进 `ok` 与日志行。
 
-**注意**：`okPhraseReplace` 用到 `C = 'Control+Alt+Shift+F11'`，而用例 4 已把它注册进主槽位、用例 6 之后主槽位是 A（C 未绑定但仍 registered）。为避免歧义，本用例直接用 C 之前先确认它没被注册：在 `okPhraseFirst` 之前插入 `globalShortcut.unregister(C);`。
+**注意 `C` 的注册状态**：用例 4 里 `applyShortcut(C)` 之后紧跟着 `applyShortcut(A)`，而「成功注册新键后注销旧键」会把 C 注销掉 —— 所以进入用例 7 时**已注册的只有 A**（主槽位），C 与 A2 都是空闲的。（对照：用例 4 之后 A 注册、C 未注册、B 未注册。）用例 7 直接用 C 注册短语槽位是可行的；为避免依赖这条推理，在 `okPhraseFirst` 之前加一行防御性的 `globalShortcut.unregister(C);`，让用例不受前面用例的影响。
 
 - [ ] **Step 4: store 自测补短语快捷键**
 
