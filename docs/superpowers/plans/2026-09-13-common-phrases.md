@@ -63,6 +63,8 @@
 - Modify: `app/electron/store.js`（末尾加纯函数）
 - Modify: `app/electron/ipc.js:458-464`
 - Modify: `app/src/App.tsx:517`
+- Modify: `app/src/global.d.ts`（`adoptPolish` 的 `id` 允许 `null`）
+- Modify: `app/electron/preload.cjs`（`adoptPolish` 的注释）
 - Test: `app/electron/selftest/store.js`
 
 **Interfaces:**
@@ -116,7 +118,7 @@ export function resolvePolishTarget(id, pendingHistoryId) {
   });
 ```
 
-- [ ] **Step 3: 渲染层保留 null**
+- [ ] **Step 3: 渲染层保留 null，并同步类型与注释**
 
 `app/src/App.tsx:517`，把
 
@@ -131,6 +133,33 @@ export function resolvePolishTarget(id, pendingHistoryId) {
           // Studio 的 pendingHistoryId（那会写错行）。只有 Studio 一路才省略 id。
           id: historyIdRef.current,
 ```
+
+**这一步必须同时改类型，否则上一步的 `null` 过不了 typecheck**（`historyIdRef.current` 的类型是 `number | null`）：
+
+`app/src/global.d.ts`：
+
+```ts
+  /**
+   * 采用润色结果，回写历史。
+   * id 显式传 null = 本次没有历史行（例如从常用语来的采纳），主进程**不会**回落；
+   * 整个字段省略 = Studio 一路，主进程回落到 pendingHistoryId。
+   */
+  adoptPolish(payload: { id?: number | null; polished: string; scene: string; tone: string }): Promise<boolean>;
+```
+
+`app/electron/preload.cjs` 里 `adoptPolish` 上方的注释同步成：
+
+```js
+  /**
+   * 采用润色结果，回写历史。
+   * payload: { id?: number | null, polished, scene, tone }
+   *   - 悬浮条**显式带 id**（本条会话的历史行）；没有历史行时传 null，
+   *     主进程不会回落到 pendingHistoryId；
+   *   - Studio 一路可整体省略 id，由主进程回落到 pendingHistoryId。
+   */
+```
+
+（Task 5 的 Step 7 里也列了这条类型改动 —— 那时它已经改好了，只需确认一致，不要重复改。）
 
 - [ ] **Step 4: 加断言**
 
@@ -173,7 +202,7 @@ Expected: 通过（本 Task 没碰 inject，这条只是确认基线是绿的）
 - [ ] **Step 6: 提交**
 
 ```bash
-git add app/electron/store.js app/electron/ipc.js app/src/App.tsx app/electron/selftest/store.js
+git add app/electron/store.js app/electron/ipc.js app/src/App.tsx app/src/global.d.ts app/electron/preload.cjs app/electron/selftest/store.js
 git commit -m "fix(adopt): 修掉润色结果写错历史行 —— 显式 null 不再回落到 pendingHistoryId"
 ```
 
@@ -701,6 +730,7 @@ async function testPhrases() {
   console.log('\n[9] 常用语选择器：捕获时机 / 状态门禁 / origin / 焦点归还');
 
   const mk = (opts = {}) => {
+    FakeSession.all = []; // 每个用例从零开始数会话，否则「不建会话」的断言数不准
     const calls = { capture: 0, activate: 0 };
     const activated = [];
     let restore = opts.shouldRestoreFocus ?? true;
@@ -794,11 +824,18 @@ async function testPhrases() {
   check('start() 重置 origin=dictation',
     i.m.getSnapshot().origin === 'dictation', i.m.getSnapshot().origin);
 
-  // ---- phrases 态不入音频队列（不积压、不外发）----
+  // ---- phrases 态不建会话、不入音频队列（不产生识别费用）----
+  // 断言必须落在**会话数量**上。原先写的「state 仍是 phrases」是个恒真断言：
+  // onAudioFrame 就算不早退，state 也不会变，那条断言永远绿、什么也没测。
+  // mk() 每次都会把 FakeSession.all 清空，所以这里的 0 是真实的。
   const j = mk();
   await j.m.openPhrases();
+  check('phrases 态不建 ASR 会话（没有会话就没有识别费用）',
+    FakeSession.all.length === 0, `${FakeSession.all.length} 个会话`);
   j.m.onAudioFrame({ seq: 1, cumSamples: 1600 }, Buffer.alloc(3200));
-  check('phrases 态音频帧不入队（无会话、无外发，且不抛）', j.m.state === 'phrases', j.m.state);
+  check('phrases 态收到音频帧也不建会话、不抛',
+    FakeSession.all.length === 0 && j.m.state === 'phrases',
+    `${FakeSession.all.length} 个会话 / ${j.m.state}`);
 }
 ```
 
@@ -1228,7 +1265,7 @@ interface PhraseRow {
   setPhraseShortcut(accel: string): Promise<{ ok: boolean; accel: string }>;
 ```
 
-同时把 `adoptPolish` 改成：
+最后**核对** `adoptPolish` 的类型（Task 1 已经改好，此处只确认一致，**不要重复改**）：
 
 ```ts
   /**
