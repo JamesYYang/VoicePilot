@@ -471,6 +471,13 @@ export async function runUiTest() {
   const studioDelta: { cb: ((p: { text: string }) => void) | null } = { cb: null };
   const studioDone: { cb: (() => void) | null } = { cb: null };
   const studioError: { cb: ((p: { message: string }) => void) | null } = { cb: null };
+  const phraseCtl = {
+    rows: [
+      { id: 1, title: '问候', text: '您好，收到您的反馈。', created_at: 2, updated_at: 2, used_at: null },
+    ] as PhraseRow[],
+    saved: null as { title: string; text: string } | null,
+    deleted: [] as number[],
+  };
   const studioBridge = {
     ...real,
     onStudioRefresh: (cb: (p: { text: string }) => void) => { studioRefreshCbs.push(cb); return () => {}; },
@@ -495,6 +502,21 @@ export async function runUiTest() {
     listPresets: () => Promise.resolve([{ id: 1, name: '邮件', description: '', lang: null, is_builtin: 1 }]),
     savePreset: () => Promise.resolve({ id: 2 }),
     deletePreset: () => Promise.resolve(true),
+    phrasesList: () => Promise.resolve(phraseCtl.rows),
+    phrasesSave: (p: { title: string; text: string }) => {
+      phraseCtl.saved = p;
+      phraseCtl.rows = [
+        ...phraseCtl.rows,
+        { id: 2, title: p.title, text: p.text, created_at: 3, updated_at: 3, used_at: null },
+      ];
+      return Promise.resolve({ id: 2 });
+    },
+    phrasesUpdate: () => Promise.resolve(true),
+    phrasesDelete: (id: number) => {
+      phraseCtl.deleted.push(id);
+      phraseCtl.rows = phraseCtl.rows.filter((r) => r.id !== id);
+      return Promise.resolve(true);
+    },
     // i18n：en-US 断言要经 I18nProvider 走 getLanguage/onLanguageChanged。
     // 这两个必须显式声明 —— 与上面 copy/reportPainted 同理，`...real`
     // 复制不到 contextBridge 的非枚举属性，缺了会静默 reject。
@@ -649,6 +671,8 @@ export async function runUiTest() {
       suspendCalls.push(s);
       return Promise.resolve(true);
     },
+    getPhraseShortcut: () => Promise.resolve({ accel: 'Ctrl+Alt+Space', isDefault: true }),
+    setPhraseShortcut: (a: string) => Promise.resolve({ ok: true, accel: a }),
   };
 
   createRoot(settingsContainer).render(<SettingsView bridge={settingsBridge} />);
@@ -1232,6 +1256,80 @@ export async function runUiTest() {
   check('derivePhraseTitle：41 字符截断到 40 并补省略号',
     derivePhraseTitle('a'.repeat(41)) === 'a'.repeat(40) + '…',
     JSON.stringify(derivePhraseTitle('a'.repeat(41))));
+
+  // ---- 27. Studio「常用语」页：列表 / 编辑 / 新建 / 删除 ----
+  // 另起一棵树，与第 24 段同款理由：不让上面的容器状态互相干扰。
+  const phContainer = document.createElement('div');
+  document.body.appendChild(phContainer);
+  createRoot(phContainer).render(<Studio bridge={studioBridge} />);
+  await flush();
+
+  const navPhrases = phContainer.querySelector<HTMLButtonElement>('[data-testid="studio-nav-phrases"]');
+  check('Studio 导航有「常用语」一项',
+    navPhrases != null && navPhrases.textContent?.includes('常用语') === true,
+    JSON.stringify(navPhrases?.textContent));
+
+  navPhrases?.click();
+  await waitFor(() => phContainer.querySelector('[data-testid="phrase-list-item"]') != null);
+  check('常用语页渲染出已有条目',
+    phContainer.querySelectorAll('[data-testid="phrase-list-item"]').length === 1,
+    String(phContainer.querySelectorAll('[data-testid="phrase-list-item"]').length));
+
+  // 选中一条 → 详情回填
+  phContainer.querySelector<HTMLElement>('[data-testid="phrase-list-item"]')?.click();
+  await flush();
+  check('选中后详情回填标题与正文',
+    phContainer.querySelector<HTMLInputElement>('[data-testid="phrase-edit-title"]')?.value === '问候' &&
+      phContainer.querySelector<HTMLTextAreaElement>('[data-testid="phrase-edit-text"]')?.value === '您好，收到您的反馈。',
+    JSON.stringify({
+      title: phContainer.querySelector<HTMLInputElement>('[data-testid="phrase-edit-title"]')?.value,
+      text: phContainer.querySelector<HTMLTextAreaElement>('[data-testid="phrase-edit-text"]')?.value,
+    }));
+
+  // 删除
+  phContainer.querySelector<HTMLButtonElement>('[data-testid="phrase-delete"]')?.click();
+  await waitFor(() => phContainer.querySelectorAll('[data-testid="phrase-list-item"]').length === 0);
+  check('删除后列表清空且调了 phrasesDelete',
+    phraseCtl.deleted.includes(1) &&
+      phContainer.querySelectorAll('[data-testid="phrase-list-item"]').length === 0,
+    JSON.stringify(phraseCtl.deleted));
+
+  // 新建：空表单 + 保存
+  phraseCtl.saved = null;
+  phContainer.querySelector<HTMLButtonElement>('[data-testid="phrase-new"]')?.click();
+  await flush();
+  check('新建时详情表单是空的、且没有删除按钮',
+    phContainer.querySelector<HTMLInputElement>('[data-testid="phrase-edit-title"]')?.value === '' &&
+      phContainer.querySelector('[data-testid="phrase-delete"]') == null);
+  check('内容为空时保存禁用',
+    phContainer.querySelector<HTMLButtonElement>('[data-testid="phrase-save"]')?.disabled === true);
+
+  const phText = phContainer.querySelector<HTMLTextAreaElement>('[data-testid="phrase-edit-text"]');
+  if (phText) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setter?.call(phText, '手写的一条常用语');
+    phText.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  await flush();
+  phContainer.querySelector<HTMLButtonElement>('[data-testid="phrase-save"]')?.click();
+  await waitFor(() => phraseCtl.saved != null);
+  // 上面那句 `phraseCtl.saved = null` 会把属性收窄成 null，而闭包里的赋值不在 TS 的
+  // 流分析里 —— 直接读 .text 会得到 never。与第 26 段同款做法：取本地常量时断言回类型。
+  const phSaved = phraseCtl.saved as { title: string; text: string } | null;
+  check('新建保存调 phrasesSave（标题留空用占位名）',
+    phSaved?.text === '手写的一条常用语' && phSaved?.title === '未命名',
+    JSON.stringify(phSaved));
+
+  // ---- 28. 设置页出现第二块快捷键（主块不受影响）----
+  const setContainer = document.createElement('div');
+  document.body.appendChild(setContainer);
+  createRoot(setContainer).render(<SettingsView bridge={settingsBridge} />);
+  await waitFor(() => setContainer.querySelector('[data-testid="settings-phrase-shortcut"]') != null);
+  check('设置页有常用语快捷键块，且主块与录制按钮都在',
+    setContainer.querySelector('[data-testid="settings-phrase-shortcut"]') != null &&
+      setContainer.querySelector('[data-testid="settings-phrase-shortcut-record"]') != null &&
+      setContainer.querySelector('[data-testid="settings-shortcut"]') != null,
+    JSON.stringify(setContainer.textContent));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

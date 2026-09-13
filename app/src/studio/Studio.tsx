@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import PolishView from './PolishView';
 import HistoryView from './HistoryView';
+import PhrasesView from './PhrasesView';
 import SettingsView from './SettingsView';
 import { useT } from '../i18n';
 
@@ -9,13 +10,13 @@ import { useT } from '../i18n';
  * 主应用（Studio）外壳 —— 润色工作区的骨架（Task 3）。
  *
  * 布局分两块：左侧 48px 图标栏 + 右侧内容区。
- * 图标栏只有三个入口：润色 / 历史 / 设置，分别渲染
- * PolishView / HistoryView / SettingsView。
+ * 图标栏只有四个入口：润色 / 历史 / 常用语 / 设置，分别渲染
+ * PolishView / HistoryView / PhrasesView / SettingsView。
  *
  * 亮色样式（spec §2）：白底、深色文字，与悬浮条的暗色浮层区分开。
  */
 
-type View = 'polish' | 'history' | 'settings';
+type View = 'polish' | 'history' | 'phrases' | 'settings';
 
 /** 左侧菜单图标（16 视口、1.5 stroke、currentColor，随文字变色）。 */
 const ICONS: Record<View, ReactNode> = {
@@ -28,6 +29,11 @@ const ICONS: Record<View, ReactNode> = {
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="8" cy="8" r="6" />
       <path d="M8 5v3l2 1.5" />
+    </svg>
+  ),
+  phrases: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 2.5h8a1 1 0 011 1V14l-5-3.4L3 14V3.5a1 1 0 011-1z" />
     </svg>
   ),
   settings: (
@@ -51,6 +57,7 @@ export default function Studio({ bridge }: { bridge?: Window['voicepilot'] } = {
   const NAV: { key: View; label: string }[] = [
     { key: 'polish', label: t('studio.polish') },
     { key: 'history', label: t('studio.history') },
+    { key: 'phrases', label: t('studio.phrases') },
     { key: 'settings', label: t('studio.settings') },
   ];
 
@@ -60,6 +67,7 @@ export default function Studio({ bridge }: { bridge?: Window['voicepilot'] } = {
         {NAV.map(({ key, label }) => (
           <button
             key={key}
+            data-testid={`studio-nav-${key}`}
             style={styles.railButton(view === key)}
             onClick={() => setView(key)}
           >
@@ -74,6 +82,8 @@ export default function Studio({ bridge }: { bridge?: Window['voicepilot'] } = {
           <PolishView bridge={bridge} />
         ) : view === 'history' ? (
           <HistoryView bridge={bridge} />
+        ) : view === 'phrases' ? (
+          <PhrasesView bridge={bridge} />
         ) : (
           <SettingsView bridge={bridge} />
         )}

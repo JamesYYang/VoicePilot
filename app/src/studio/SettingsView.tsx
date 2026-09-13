@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useT, useLocale } from '../i18n';
 import type { Locale } from '../../shared/i18n/index.js';
@@ -55,7 +55,10 @@ export default function SettingsView({ bridge }: { bridge?: Window['voicepilot']
       </select>
 
       <h2 style={{ ...styles.h2, marginTop: 16 }}>{t('settings.shortcut')}</h2>
-      <ShortcutSetting vp={vp} />
+      <ShortcutSetting vp={vp} slot="main" />
+
+      <h2 style={{ ...styles.h2, marginTop: 16 }}>{t('settings.phraseShortcut')}</h2>
+      <ShortcutSetting vp={vp} slot="phrases" />
 
       <h2 style={{ ...styles.h2, marginTop: 16 }}>{t('settings.permissions')}</h2>
 
@@ -88,18 +91,32 @@ export default function SettingsView({ bridge }: { bridge?: Window['voicepilot']
 /**
  * 快捷键录制。点击后进入录制态，捕获下一个带修饰键的组合键。
  * 冲突（主进程注册失败）时显示提示且**不更新**界面上的当前键。
+ *
+ * 两个槽位（main / phrases）共用这套控件：录制期间挂起的是**整个** globalShortcut
+ * （setShortcutSuspended 管的是全局开关），两个键一起挂起正是录制时要的行为。
  */
-function ShortcutSetting({ vp }: { vp: Window['voicepilot'] }) {
+function ShortcutSetting({ vp, slot }: { vp: Window['voicepilot']; slot: 'main' | 'phrases' }) {
   const t = useT();
   const [accel, setAccel] = useState('');
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState('');
 
+  const prefix = slot === 'phrases' ? 'settings-phrase-shortcut' : 'settings-shortcut';
+  const hintKey = slot === 'phrases' ? 'settings.phraseShortcut.hint' : 'settings.shortcut.hint';
+  const read = useCallback(
+    () => (slot === 'phrases' ? vp.getPhraseShortcut() : vp.getShortcut()),
+    [vp, slot]
+  );
+  const write = useCallback(
+    (next: string) => (slot === 'phrases' ? vp.setPhraseShortcut(next) : vp.setShortcut(next)),
+    [vp, slot]
+  );
+
   useEffect(() => {
     let alive = true;
-    void vp.getShortcut().then((r) => { if (alive) setAccel(r.accel); }).catch(() => {});
+    void read().then((r) => { if (alive) setAccel(r.accel); }).catch(() => {});
     return () => { alive = false; };
-  }, [vp]);
+  }, [read]);
 
   // 录制：只在 recording 时监听 keydown。Esc = 取消录制（不提交、直接退出录制态）；
   // 其余无法表达的键不提交，留在录制态等用户重按
@@ -121,13 +138,13 @@ function ShortcutSetting({ vp }: { vp: Window['voicepilot'] }) {
         return;
       }
       setRecording(false);
-      const r = await vp.setShortcut(next).catch(() => ({ ok: false, accel }));
+      const r = await write(next).catch(() => ({ ok: false, accel }));
       if (r.ok) { setAccel(r.accel); setError(''); }
       else { setError(t('settings.shortcut.conflict')); }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [recording, vp, t, accel]);
+  }, [recording, write, t, accel]);
 
   // 录制期间挂起全局快捷键：OS 级快捷键在本应用窗口有焦点时照样触发，
   // preventDefault 拦不住 —— 不挂起的话，用户按下的组合键会被主进程当成
@@ -141,11 +158,11 @@ function ShortcutSetting({ vp }: { vp: Window['voicepilot'] }) {
   return (
     <div style={styles.block}>
       <div style={styles.statusRow}>
-        <span data-testid="settings-shortcut" style={styles.label}>
+        <span data-testid={prefix} style={styles.label}>
           {recording ? t('settings.shortcut.recording') : accel}
         </span>
         <button
-          data-testid="settings-shortcut-record"
+          data-testid={`${prefix}-record`}
           style={styles.button}
           onClick={() => { setError(''); setRecording(true); }}
         >
@@ -153,7 +170,7 @@ function ShortcutSetting({ vp }: { vp: Window['voicepilot'] }) {
         </button>
       </div>
       {error && <span style={{ color: '#dc2626' }}>{error}</span>}
-      <span style={styles.plain}>{t('settings.shortcut.hint')}</span>
+      <span style={styles.plain}>{t(hintKey)}</span>
     </div>
   );
 }

@@ -35,6 +35,7 @@ export const zhCN = {
   // 主应用导航
   'studio.polish': '润色',
   'studio.history': '历史',
+  'studio.phrases': '常用语',
   'studio.settings': '设置',
   // 润色工作区
   'polish.scene': '场景',
@@ -59,6 +60,16 @@ export const zhCN = {
   'history.selectHint': '选中一条历史查看全文',
   'history.seconds': '秒',
   'history.delete': '删除',
+  // 常用语管理
+  'phrase.title': '标题',
+  'phrase.text': '内容',
+  'phrase.listEmpty': '还没有常用语',
+  'phrase.selectHint': '选中一条常用语查看或编辑',
+  'phrase.save': '保存',
+  'phrase.saved': '已保存',
+  'phrase.delete': '删除',
+  'phrase.new': '新建',
+  'phrase.untitled': '未命名',
   // 预设管理
   'preset.manage': '管理预设',
   'preset.edit': '编辑',
@@ -88,6 +99,8 @@ export const zhCN = {
   'settings.shortcut.conflict': '该快捷键已被占用，请换一个',
   'settings.shortcut.hint': '按下组合键即可修改全局听写快捷键',
   'settings.shortcut.unsupported': '这个按键不能用作快捷键，请换一个',
+  'settings.phraseShortcut': '常用语快捷键',
+  'settings.phraseShortcut.hint': '按下组合键即可修改唤起常用语的全局快捷键',
   // 欢迎页
   'onboarding.titlePrefix': '欢迎使用',
   'onboarding.intro': '按 {{shortcut}} 开始语音输入，说完自动生成文字，可一键复制或润色。',
