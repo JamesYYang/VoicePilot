@@ -94,14 +94,16 @@ export async function runInjectSelftest() {
   check('koffi 已加载且暴露 load()', typeof koffi?.load === 'function');
 
   if (process.platform === 'win32') {
-    // 这一步同时在验「打包后 .node 能被 dlopen」（spec §8 第 1/2/3 条）。
+    // 这里验的是「开发态能加载并调用 real user32」。
+    // **不能**声称验了「打包后 .node 能被 dlopen」—— 那条只在打包版成立，见 Task 8 的 runbook。
     const user32 = koffi.load('user32.dll');
     const GetForegroundWindow = user32.func('uintptr_t GetForegroundWindow()');
     const hwnd = GetForegroundWindow();
     // 无人值守进程里可能没有前台窗口（返回 0），所以不断言具体值，只断言**类型对**。
-    // 类型断言是关键：koffi 默认把 void* 解成**指针对象**，而指针对象每次都是新对象、
-    // 不能用 !== 比数值相等。HWND 一律声明成 uintptr_t（→ BigInt）才可比。
-    check('GetForegroundWindow() 返回 uintptr_t（bigint）', typeof hwnd === 'bigint', String(typeof hwnd));
+    // 类型断言是关键：koffi 对 `void*` 返回的是指针值，不能用 !== 比数值相等
+    // （每次都是新值 / 类型不同）。HWND 一律声明成 uintptr_t —— 实测 koffi 3.2.1 下
+    // `uintptr_t` / `uint64_t` / `intptr_t` 返回的都是 **number**，number 可以直接 !== 比较。
+    check('GetForegroundWindow() 返回可比较的数值（number）', typeof hwnd === 'number', String(typeof hwnd));
   } else if (process.platform === 'darwin') {
     const cg = koffi.load(
       '/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics'
@@ -162,11 +164,16 @@ Expected: 打印 `[自测] 注入层（inject）`，两项 `ok`，退出码 0。
 
 ```json
     "asarUnpack": [
-      "node_modules/koffi/**"
+      "node_modules/koffi/**",
+      "node_modules/@koromix/**"
     ],
 ```
 
-显式写死而不依赖 electron-builder 的 smartUnpack 自动判定：这一步错了只在打包版暴露，而打包版恰恰是最难查的环境（见 `docs/macos-test-runbook.md` 记录的三个「只在打包版出现」的坑）。
+`node_modules/@koromix/**` 不是多余的：koffi 3.x 把原生二进制挪到了平台专属的可选依赖
+`@koromix/koffi-<platform>-<arch>/` 下，**`node_modules/koffi/` 里一个 `*.node` 都没有**
+（Task 1 实测），所以只写 `koffi/**` 是**空操作**，打包版只能押在 electron-builder 的
+smartUnpack 上。显式写死而不依赖 smartUnpack：这一步错了只在打包版暴露，而打包版恰恰是
+最难查的环境（见 `docs/macos-test-runbook.md` 记录的三个「只在打包版出现」的坑）。
 
 - [ ] **Step 6: 确认没弄坏别的自测**
 
@@ -183,7 +190,10 @@ git add app/package.json app/package-lock.json app/electron/selftest/inject.js a
 git commit -m "feat(inject): 引入 koffi + 注入层自测入口（实施第一步的关卡）"
 ```
 
-> **交付给 Task 3/4 的结论（必须写进 Task 3 的实现里）**：`GetForegroundWindow` 用 `uintptr_t` 声明时返回的是 `bigint`。若实测不是，用 `koffi.address(x)` 取地址再比数值 —— **不要退回去用 `void*` 的指针对象直接比**。
+> **交付给 Task 3/4 的结论（Task 1 实测，2026-09-13；必须据此写 Task 3 的实现）**：
+> - koffi 3.2.1 装到的是**预编译包**（无编译步骤），`koffi.load('user32.dll')` 可用，`GetForegroundWindow()` 返回真实 HWND。
+> - **`uintptr_t` / `uint64_t` / `intptr_t` 声明的返回值 → `number`；`void*` → bigint；`koffi.address(x)` → bigint。** 所以 HWND 用 `uintptr_t` 并用 `!==` 直接比数值即可，**不需要** `koffi.address()`。计划早期版本假设的「uintptr_t → bigint」是错的。
+> - HWND 在 Windows 上远小于 2^53，`number` 不会有精度问题。
 
 ---
 
@@ -198,7 +208,7 @@ git commit -m "feat(inject): 引入 koffi + 注入层自测入口（实施第一
 **Interfaces:**
 - Consumes: Task 1 的 koffi 加载结论
 - Produces:
-  - `type Target = { kind: 'win'; hwnd: bigint } | { kind: 'mac'; pid: number; bundleId: string | null }`
+  - `type Target = { kind: 'win'; hwnd: number } | { kind: 'mac'; pid: number; bundleId: string | null }`
   - `captureTarget(): Target | null`（`inject/index.js` 导出）
   - `classifyForeground(targetId, actualId): { ok: true } | { ok: false; reason: 'no-target' | 'activate-failed' }`（`inject/index.js` 导出，纯函数）
 
@@ -223,8 +233,8 @@ function lib() {
   if (api) return api;
   const user32 = koffi.load('user32.dll');
   api = {
-    // HWND 一律用 uintptr_t（→ bigint）。不能用 void* —— koffi 会把它解成指针
-    // 对象，而指针对象每次都是新对象，=== 比较永远为 false，置前确认会恒失败。
+    // HWND 一律用 uintptr_t。实测 koffi 3.2.1 下 uintptr_t 返回 **number**，可直接 !== 比较；
+    // 不能用 `void*`（返回的是指针值，不可比数值）。
     GetForegroundWindow: user32.func('uintptr_t GetForegroundWindow()'),
   };
   return api;
@@ -316,13 +326,13 @@ import { captureTarget, classifyForeground } from '../inject/index.js';
   check('目标为 null → no-target',
     classifyForeground(null, 123)?.reason === 'no-target');
   check('回读到的前台与目标一致 → ok',
-    classifyForeground(123n, 123n)?.ok === true);
+    classifyForeground(123, 123)?.ok === true);
   check('回读到的前台与目标不一致 → activate-failed',
-    classifyForeground(123n, 456n)?.reason === 'activate-failed');
+    classifyForeground(123, 456)?.reason === 'activate-failed');
   check('回读不到前台（null）→ activate-failed，不得当成 ok',
-    classifyForeground(123n, null)?.reason === 'activate-failed');
-  check('bigint 的 HWND 按数值比较（不是对象身份）',
-    classifyForeground(BigInt(9), BigInt(9))?.ok === true);
+    classifyForeground(123, null)?.reason === 'activate-failed');
+  check('HWND 按数值比较（不是对象身份）',
+    classifyForeground(9, 9)?.ok === true);
 
   // ---- 捕获：不抛，且形状正确（拿不到就 null）----
   let captured = null;
@@ -485,7 +495,7 @@ export async function pasteTo(target) {
   try {
     const r = await impl.pasteTo(target);
     if (!r?.ok) return { ok: false, reason: r?.reason ?? 'send-failed' };
-    // 平台实现回读到的前台标识。Windows 是 HWND(bigint)，macOS 是 pid(number)。
+    // 平台实现回读到的前台标识。Windows 是 HWND(number)，macOS 是 pid(number)。
     const cls = classifyForeground(target.hwnd ?? target.pid, r.id);
     return cls.ok ? { ok: true } : cls;
   } catch (e) {
@@ -568,7 +578,7 @@ import koffi from 'koffi';
  * 正好接上已有的 vp:permission/status 与 F12 引导。见 spec §4.2。
  */
 
-const BOTH_ACTIVATION_OPTIONS = 3n; // NSApplicationActivateAllWindows(1) | IgnoringOtherApps(2)
+const BOTH_ACTIVATION_OPTIONS = 3; // NSApplicationActivateAllWindows(1) | IgnoringOtherApps(2)
 const VK_V = 0x09;
 const K_CG_EVENT_FLAG_MASK_COMMAND = 1 << 20;
 const K_CG_HID_EVENT_TAP = 0;
@@ -589,9 +599,9 @@ function lib() {
   const msgSendI32 = objc.func('int32_t objc_msgSend(void* receiver, void* selector)');
   const msgSendCStr = objc.func('const char* objc_msgSend(void* receiver, void* selector)');
   const msgSendPtrI32 = objc.func('void* objc_msgSend(void* receiver, void* selector, int32_t arg)');
-  // activateWithOptions: 的参数是 NSUInteger（64 位）。**必须声明成 64 位并传 BigInt**：
-  // 声明成 uint32_t 时 koffi 只写寄存器的低 32 位，高 32 位是什么由 ABI 决定，
-  // 目标可能读到一个天文数字的 options。
+  // activateWithOptions: 的参数是 NSUInteger（64 位）。**必须声明成 64 位**：声明成
+  // uint32_t 时 koffi 只写寄存器的低 32 位，高 32 位是什么由 ABI 决定，目标可能读到一个
+  // 天文数字的 options。传 number 即可（Task 1 实测 uintptr_t 与 number 互通）。
   const msgSendVoidUPtr = objc.func('void objc_msgSend(void* receiver, void* selector, uintptr_t arg)');
 
   // 只为确保 AppKit 已在本进程里加载，否则 objc_getClass('NSWorkspace') 会拿到 null。
