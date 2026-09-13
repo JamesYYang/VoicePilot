@@ -886,6 +886,50 @@ export async function runUiTest() {
     container.querySelectorAll('[data-testid^="bar-hint"]').length === 0,
     JSON.stringify(Array.from(container.querySelectorAll('[data-testid^="bar-hint"]')).map((n) => n.textContent)));
 
+  // ---- 23b. 采纳写回失败：保留悬浮条 + 按 reason 给提示 ----
+  // 「剪贴板从不还原」的兑现：失败时文本仍在剪贴板，提示必须告诉用户手动粘。
+  // 每段都先 enterReviewing() 重走 idle → warming，借复位的 setHint('') 拿到干净提示；
+  // 若某条红在「上一条的文案」上，说明复位块被动过，不是测试的问题。
+  await enterReviewing();
+  copyCtl.text = null;
+  const toggleBeforeFail = toggleCount;
+  adoptPasteCtl.result = { ok: false, reason: 'activate-failed' };
+  adoptPasteCtl.calls = 0;
+  clickButton('采纳');
+  await flush();
+  check('写回失败时确实调了写回通道', adoptPasteCtl.calls === 1, `${adoptPasteCtl.calls} 次`);
+  check('写回失败时不关闭悬浮条', toggleCount === toggleBeforeFail,
+    `${toggleBeforeFail} → ${toggleCount}`);
+  check('写回失败时剪贴板已写好（不还原）', copyCtl.text !== null, JSON.stringify(copyCtl.text));
+  check('activate-failed 给出通用失败提示',
+    container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent ===
+      '自动写回失败，已复制到剪贴板，请手动粘贴',
+    JSON.stringify(container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent));
+
+  // permission 必须给**不同**的文案：它是唯一可操作的失败（去授权），
+  // 若与通用文案混同，macOS 用户拿不到「该去授权」这个提示。
+  await enterReviewing();
+  adoptPasteCtl.result = { ok: false, reason: 'permission' };
+  clickButton('采纳');
+  await flush();
+  check('permission 给出可操作的不同文案',
+    container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent ===
+      '未获得辅助功能权限，无法自动写回。已复制到剪贴板，请手动粘贴',
+    JSON.stringify(container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent));
+
+  // stale 同理，指向「目标窗口没了」这个具体原因。
+  await enterReviewing();
+  adoptPasteCtl.result = { ok: false, reason: 'stale' };
+  clickButton('采纳');
+  await flush();
+  check('stale 指出目标窗口已关闭',
+    container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent ===
+      '目标窗口已关闭，已复制到剪贴板，请手动粘贴',
+    JSON.stringify(container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent));
+
+  // 复位，避免影响后面的用例（第 24 段起还会复用这棵 App 树）
+  adoptPasteCtl.result = { ok: true };
+
   // ---- 24. 无预设路径：runPolish 早退必须给明确提示、且不渲染结果区 ----
   // 既有假 bridge 的 polishPresets 恒返回预设，runPolish 里 `!scene || !tone` 的
   // bar.err.noPresets 分支从未被走到。按本文件既有做法（见 Studio 的 studioBridge）
