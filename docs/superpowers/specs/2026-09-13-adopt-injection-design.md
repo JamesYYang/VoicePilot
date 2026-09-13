@@ -214,7 +214,7 @@ adopt():
 6. **`objc_msgSend` 经 koffi 的脆弱度** —— 若不可用，走 §4.2 的 `open -b` 退路。
    **结论（2026-09-13）**：**未验（需 Mac 真机）**。macOS 实现自写出后**从未执行过**，以下全部待验：五个 `objc_msgSend` 声明（`msgSendPtr` / `msgSendI32` / `msgSendCStr` / `msgSendPtrI32` / `msgSendBoolUPtr`）的形状正确性；`AXIsProcessTrusted` 能否从 ApplicationServices umbrella framework 解析出符号（符号实际在 HIServices）；`frontPid()` 是否返回真实前台 pid；`pid === process.pid` 自守的前提（`frontmostApplication` 报的是我们主进程 pid）是否成立；`CGEventPost` 在授权后是否真的粘贴一次。全部通过前不得启用 `open -b` 退路，也不得改本决策。
 7. 置前与发键之间的间隔在各平台上定稿（Windows 60ms / macOS 120ms 是起点，不是承诺）。
-   **结论（2026-09-13，Windows 真机）**：**激活本身不是失败点** —— 实测前台到位约 **8–48ms**（远小于等待值），调大/调小 `ACTIVATE_WAIT_MS` 都不是关键旋钮。真正的失败是**我们自己的悬浮条拆条动作扰动掉了目标的激活/键盘焦点**，与这个间隔无关。修法已落地：置前目标**之前**先交出悬浮条的可聚焦性（拆条时那次 `setFocusable(false)` 因此成为空操作），并在成功后加一段 settle 延时（`VP_ADOPT_SETTLE_MS`，默认 250，见 `app/electron/ipc.js`）。
+   **结论（2026-09-13，Windows 真机）**：**激活本身不是失败点** —— 实测前台到位约 **13–48ms**（远小于等待值），调大/调小 `ACTIVATE_WAIT_MS` 都不是关键旋钮。真正的失败是**我们自己的悬浮条拆条动作扰动掉了目标的激活/键盘焦点**，与这个间隔无关。修法已落地：置前目标**之前**先交出悬浮条的可聚焦性（拆条时那次 `setFocusable(false)` 因此成为空操作），并在成功后加一段 settle 延时（`VP_ADOPT_SETTLE_MS`，默认 250，见 `app/electron/ipc.js`）。
    ⚠️ **这两处现在是承重的设计，不再是实现细节**：去掉任一处，真机上会分别出现「粘贴作废」或「粘贴成功但光标回不到目标」。
    ⚠️ **仅在 Windows 测量**：macOS 的 120ms 与 settle 值都**未验**；Mac 上先试 `VP_ADOPT_SETTLE_MS=0` 判断是否还需要这段延时。
 8. 各失败 `reason` 对应的中文文案（三语齐全，走 `app/shared/i18n/*`）。

@@ -257,7 +257,7 @@ export function sendPaste() {
     const foc = readFocusOfThread(a.GetWindowThreadProcessId(fg, null))?.hwndFocus ?? null;
     dbg(
       `发键时: 前台=${fg} 该线程焦点窗口=${foc ?? 'null'}` +
-        (foc ? ` = ${describeWindow(foc)}` : '（无焦点窗口：按键会被丢弃）')
+        (foc ? ` = ${describeWindow(foc)}` : '（无焦点窗口：按键会走该线程的活动窗口）')
     );
   }
   // 诊断：只发一个字面字符。若它在目标里都不出现，说明目标**根本没收到**我们注入的
