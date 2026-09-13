@@ -335,10 +335,10 @@ settings.phraseShortcut.hint    '按下组合键即可修改唤起常用语的�
 | 文档 | 改动 |
 |---|---|
 | 本文件 | 新增 |
-| `docs/plans/2026-09-05-voicepilot-prd.md` | 待实现落地后再改（描述的是已交付行为，提前改会骗人）：新增 **F16**「常用语」条目与第二个全局快捷键。**注意 F14/F15 已被「翻译」「导出 PDF」占用**，不要回头去用 F14 |
-| `README.md` | 同上，落地后同步 |
-| `docs/superpowers/specs/2026-09-12-trial-feedback-design.md` | 落地后在 §1 补第 6 条反馈的落点指针，指向本文件 |
-| `docs/superpowers/specs/2026-09-13-adopt-injection-design.md` | 新增 §2.5 的修复会改动它 §3 的 `adoptPolish` 调用形态（新增显式 `null` 语义），落地时同步 |
+| `docs/plans/2026-09-05-voicepilot-prd.md` | **✅ 已完成（2026-09-13，实现区间 `648987a…2c5b193`）**：新增 **F16**「常用语」条目与第二个全局快捷键（版本升至 v1.9）。**F14/F15 已被「翻译」「导出 PDF」占用**，编号绕开 |
+| `README.md` | **✅ 已完成（2026-09-13，同一实现区间）**：形态表 / 核心流程 / 默认快捷键 / 已知限制各同步一处，并链到 `docs/common-phrases-test-runbook.md` |
+| `docs/superpowers/specs/2026-09-12-trial-feedback-design.md` | ⏳ 待办：落地后在 §1 补第 6 条反馈的落点指针，指向本文件（不在本 Task 的文件清单内） |
+| `docs/superpowers/specs/2026-09-13-adopt-injection-design.md` | ⏳ 待办：新增 §2.5 的修复会改动它 §3 的 `adoptPolish` 调用形态（新增显式 `null` 语义），落地时同步（不在本 Task 的文件清单内） |
 
 ## 6. 待验证 / 已知风险
 
