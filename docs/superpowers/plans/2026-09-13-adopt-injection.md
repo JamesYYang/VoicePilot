@@ -967,20 +967,34 @@ async function testCaptureTarget() {
 
   let calls = 0;
   let stateAtCapture = null;
+  let session = null;
   const holder = {};
   const m = new SessionMachine({
     emit() {},
-    createSession: () => new FakeSession({}),
+    // 会话卡在「建立中」：start() 才会停在 warming，第二次 toggle 才走「取消」路径。
+    // 不 hold 的话 start() 直接进 listening，toggle 会变成 stop → draining → reviewing，
+    // 那验的就是另一条生命周期了（而且 reviewing 不清空目标，两条断言会假红）。
+    createSession: () => {
+      session = new FakeSession({});
+      session.startHeld = true;
+      return session;
+    },
     credentials: {},
     captureTarget: () => {
       calls += 1;
       stateAtCapture = holder.m.state;
-      return { kind: 'win', hwnd: 7n };
+      // 必须是 number，不能写 7n：Target 的 hwnd 就是 number（koffi 实测），
+      // 而且下面 check 的 detail 参数会被**立即求值**，JSON.stringify(7n) 会抛，
+      // 整轮自测直接中断。
+      return { kind: 'win', hwnd: 7 };
     },
   });
   holder.m = m;
 
-  await m.start();
+  // 不能 await：会话被 hold 住，await 会一直挂 —— 而 warming 恰恰就是这段等待窗。
+  // 捕获跑在第一个 await 之前，所以这一行调用之后目标就已经取好了。
+  const pending = m.start();
+  await tick();
   check('start 时捕获一次', calls === 1, `捕获 ${calls} 次`);
   check('捕获发生在进 warming 之前', stateAtCapture === 'idle', String(stateAtCapture));
   check('目标已持有', m.getTarget() !== null, JSON.stringify(m.getTarget()));
@@ -988,6 +1002,10 @@ async function testCaptureTarget() {
   await m.toggle(); // warming → 取消
   check('取消后清空目标', m.getTarget() === null, JSON.stringify(m.getTarget()));
   check('取消后回到 idle', m.state === 'idle', m.state);
+
+  // 放行被取消的会话，让 start() 的 promise 收尾，别留下悬挂的 pending。
+  session.releaseStart();
+  await pending;
 }
 ```
 
@@ -998,6 +1016,8 @@ async function testCaptureTarget() {
 ```
 
 > **为什么这里不验「捕获实现抛异常时状态机兜得住」**：兜底责任在 `inject/index.js` 的 `captureTarget`（它自己 try/catch 并返回 null），不在状态机 —— 状态机只认「一个返回 `Target|null` 的函数」这个契约，不该替实现擦屁股。给状态机加 try/catch 会把真实现里的 bug 一起吞掉。那条契约由 `VP_INJECT_SELFTEST` 的 `captureTarget() 不抛` 覆盖（Task 2）。
+
+> **本 Task 的基线不是 29 而是 34。** 计划早期写的「29 + 5 = 34」已过时（2A 的 `testBarFocusable` 等新增用例把它推到了 34）。实测：改动前 **34** 项、改动后 **39** 项。**报实际观测值，不要为了让数字对上而改断言。**
 
 - [ ] **Step 3: 加 IPC 通道**
 
@@ -1058,7 +1078,7 @@ Run: `cd app && npm run typecheck`
 Expected: 干净通过
 
 Run: `cd app && VP_SM_SELFTEST=1 npx electron .`
-Expected: 通过。**此时总数应为 29 + 5 = 34**（原 29 项 + `testCaptureTarget` 的 5 项）；若不是 34，说明自测没接进 `runMachineSelftest`。Run: `cd app && VP_INJECT_SELFTEST=1 npx electron .`
+Expected: 通过。**此时总数应为 34 + 5 = 39**（改前实测 34 项 + `testCaptureTarget` 的 5 项；计划早期写的 29 是过时基线）；若不是 39，说明自测没接进 `runMachineSelftest`。Run: `cd app && VP_INJECT_SELFTEST=1 npx electron .`
 Expected: 通过
 
 > ⚠️ **本条无法自动验**：`vp:adopt/paste` 真的把前台切过去并粘上。IPC 通道本身在界面自测里（Task 7）只验「有没有被调用、参数对不对」。
@@ -1249,7 +1269,7 @@ Run: `cd app && npm run build && VP_UI_SELFTEST=1 npx electron .`
 Expected: **Step 2 里红的那条现在绿了**，全部通过、退出码 0。若仍红，说明实现与断言对不上 —— 先查 `adopt` 有没有真的在 `r.ok` 分支调 `vp.toggle()`。
 
 Run: `cd app && VP_SM_SELFTEST=1 npx electron .`
-Expected: 34/34 通过（Task 5 之后的总数）
+Expected: 39/39 通过（Task 5 之后的总数）
 
 - [ ] **Step 6: Commit**
 
