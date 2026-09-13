@@ -1,4 +1,5 @@
 import koffi from 'koffi';
+import { app } from 'electron';
 
 /**
  * Windows 注入实现。
@@ -13,13 +14,6 @@ const VK_V = 0x56;
 const VK_A = 0x41;
 const VK_Z = 0x5a;
 const KEYEVENTF_KEYUP = 0x0002;
-// 诊断用：换掉「要发什么键」，用来区分失败发生在哪一段。
-//   type      —— 只发一个字面字符 z：若它进不去，说明按键**根本没被目标收到**
-//   selectall —— 发 Ctrl+A：在 Word/浏览器/终端里都有可见效果且不破坏内容
-// 不设 = 现状（Ctrl+V）。
-// （曾有个 scancode 模式用来验「扫描码传 0 被丢弃」—— 真机已证伪：带真实扫描码同样
-//   不生效，真正根因是修饰键丢失，见 INPUT 结构处。已删，不留死代码。）
-const PROBE = process.env.VP_INJECT_PROBE ?? '';
 // 置前是异步的：SetForegroundWindow 返回时目标未必已经真的拿到前台。
 // 60ms 是起点不是承诺（spec §8 第 7 条），真机不合就在 Task 8 调。
 const ACTIVATE_WAIT_MS = 60;
@@ -32,6 +26,20 @@ const PROBE_INTERVAL_MS = 10;
  * `VP_ASR_DEBUG` / `VP_OPEN_DIAG` 一致。
  */
 const DEBUG = process.env.VP_INJECT_DEBUG === '1';
+
+// 诊断用：换掉「要发什么键」，用来区分失败发生在哪一段。
+//   type      —— 只发一个字面字符 z：若它进不去，说明按键**根本没被目标收到**
+//   selectall —— 发 Ctrl+A：在 Word/浏览器/终端里都有可见效果且不破坏内容
+// 不设 = 现状（Ctrl+V）。
+// （曾有个 scancode 模式用来验「扫描码传 0 被丢弃」—— 真机已证伪：带真实扫描码同样
+//   不生效，真正根因是修饰键丢失，见 INPUT 结构处。已删，不留死代码。）
+//
+// ⚠️ 与仓库里其它只打日志的 `VP_*` 开关不同，这个开关**会真的改产品行为**：
+//   `type` 会往用户当前的前台应用里敲进一个 z；
+//   `selectall` 会发 Ctrl+A，且**照样按 ok 上报**（剪贴板文本根本没被粘贴）。
+// 所以它必须**双闸门**：既要 `VP_INJECT_DEBUG=1`，又必须是非打包构建
+// （`!app.isPackaged`）。**交给试用者的包里永远不可达** —— 不要放宽这两道中的任何一道。
+const PROBE = DEBUG && !app.isPackaged ? (process.env.VP_INJECT_PROBE ?? '') : '';
 
 /** 等待上限（毫秒）。`VP_INJECT_WAIT_MS=<n>` 可在不重新打包的前提下试不同值。 */
 function waitMs() {
@@ -59,6 +67,12 @@ const GUITHREADINFO = koffi.struct('GUITHREADINFO', {
   hwndCaret: 'uintptr_t',
   rcCaret: RECT,
 });
+
+/**
+ * x64 下必须是 72。导出给自测断言 —— 与 `INPUT_SIZE` 同款理由：`cbSize` 写错时
+ * `GetGUIThreadInfo` 只会返回 false，是一条**静默的假阴性**，肉眼看不出来。
+ */
+export const GUITHREADINFO_SIZE = koffi.sizeof(GUITHREADINFO);
 
 /**
  * SendInput 的 INPUT 结构。
@@ -164,12 +178,12 @@ function readForeground() {
  *
  * ⚠️ 纯粹诊断用，**不参与判定**：判定仍只看「回读前台窗口 == 目标」（spec §3）。
  * 之所以值得记下来，是因为「前台到了但焦点没到」正是真机上「报成功却什么都没插进去」
- * 的嫌疑机制 —— keybd_event 的按键投给的是**焦点**窗口，不是前台窗口。
+ * 的嫌疑机制 —— SendInput 投递的按键落到的是**焦点**窗口，不是前台窗口。
  */
 function readFocusOfThread(tid) {
   if (!tid) return null;
   const info = {
-    cbSize: koffi.sizeof(GUITHREADINFO),
+    cbSize: GUITHREADINFO_SIZE,
     flags: 0,
     hwndActive: 0,
     hwndFocus: 0,
@@ -191,7 +205,10 @@ function describeWindow(hwnd) {
   a.GetClassNameW(hwnd, cls, 256);
   a.GetWindowTextW(hwnd, title, 512);
   const cut = (b) => b.toString('utf16le').replace(/\0.*$/, '');
-  return `${cut(cls)}" ${cut(title) ? `"${cut(title)}"` : ''}`.trim();
+  const c = cut(cls);
+  const t = cut(title);
+  // 标题为空时只回类名；非空时格式是 `类名 "标题"`（旧实现会多出一个游离的 `"`）。
+  return t ? `${c} "${t}"` : c;
 }
 
 /**
@@ -300,7 +317,7 @@ export async function activate(target) {
 
   // 等待 + 诊断探测。**不改变判定**：仍然等满 waitMs，返回的仍是回读到的前台句柄。
   // 探测要回答的是「前台什么时候到」「目标线程什么时候真的拿到键盘焦点」——
-  // keybd_event 的按键投给**焦点**窗口，二者不同步就是「报成功却没插进去」的机制。
+  // SendInput 投递的按键落到**焦点**窗口，二者不同步就是「报成功却没插进去」的机制。
   const targetTid = a.GetWindowThreadProcessId(hwnd, null);
   const t0 = Date.now();
   const wait = waitMs();
@@ -334,10 +351,14 @@ export async function activate(target) {
     );
     if (lastFocus) dbg(`焦点窗口 ${lastFocus} = ${describeWindow(lastFocus)}`);
   }
-  if (focusAt === null) {
+  // ⚠️ 只在 DEBUG 下报，而且**不声称粘贴一定会失败**。
+  // 真机上见过这条打出来、粘贴却成功了（该线程没有焦点窗口时，注入的按键仍会被路由到
+  // 它的活动窗口）。所以它是诊断观察、不是失败信号 —— 无条件当作产品告警打，只会把
+  // 「成功」教成「忽略告警」。本文件其余诊断同样一律 DEBUG 门控。
+  if (DEBUG && focusAt === null) {
     console.warn(
-      `[注入] ⚠️ 目标窗口拿到了前台，但目标线程在 ${wait}ms 内**没有拿到键盘焦点**：` +
-        `此时发键会落到仍持有焦点的窗口里（很可能就是我们自己）→ 文本不会进入目标。`
+      `[注入] 观测：目标窗口已到前台，但目标线程在 ${wait}ms 内没有读到自己的键盘焦点窗口。` +
+        `这不一定代表粘贴会失败（注入的按键仍可能被路由到该线程的活动窗口），仅供排障参考。`
     );
   }
   return { ok: true, id: fg };

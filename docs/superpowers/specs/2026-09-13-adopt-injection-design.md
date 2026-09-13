@@ -95,7 +95,7 @@ adopt():
 
 **成功判据 = 「目标窗口确实到了前台」，不是「粘贴被消费了」。**
 
-后者原理上不可检：`keybd_event` 只报告事件已入队，不报告目标应用是否处理。前者可检，且覆盖最常见的失败（置前被系统拒绝）。因此：置前后回读一次前台窗口，不等于目标就判 `activate-failed`。
+后者原理上不可检：`SendInput` 只报告事件已入队，不报告目标应用是否处理。前者可检，且覆盖最常见的失败（置前被系统拒绝）。因此：置前后回读一次前台窗口，不等于目标就判 `activate-failed`。
 
 因为**从不还原剪贴板**，失败时剪贴板里仍是文本 —— 与 2A 的行为完全一致，用户可以直接手动粘。这条让「失败」的后果从"文本丢失"降级为"没省一步"，也是 §0 决策 2 的主要收益。
 
@@ -112,9 +112,9 @@ adopt():
 | 置前兜底 | 失败时 `GetWindowThreadProcessId` 取目标线程 id → `AttachThreadInput` 把自己挂上去 → 重试 → 卸载 |
 | 确认 | 回读 `user32.GetForegroundWindow()`，不等于目标 → `activate-failed` |
 | 间隔 | 等约 60ms（`setTimeout`，不阻塞事件循环） |
-| 发键 | `user32.keybd_event`：`VK_CONTROL(0x11)`↓ → `VK_V(0x56)`↓ → `VK_V`↑ → `VK_CONTROL`↑，抬起用 `KEYEVENTF_KEYUP(0x0002)` |
+| 发键 | `user32.SendInput`：**一次调用**投递整批 `[Ctrl↓, V↓, V↑, Ctrl↑]` 的 `INPUT`（`type=INPUT_KEYBOARD`），抬起用 `KEYEVENTF_KEYUP(0x0002)` |
 
-**用 `keybd_event` 而不是 `SendInput`**：本场景只需要一次四键组合，用不上 `SendInput` 的批量能力；而 `SendInput` 要声明 `INPUT` 联合体，在 x64 下有 4 字节对齐填充（结构体应为 40 字节），是个容易写错且错了不报错的坑。`keybd_event` 已废弃但仍在 user32 里正常工作，签名只有四个标量参数。
+**必须用 `SendInput` 的批量投递，不能用四次独立的 `keybd_event`**（这是真机踩出来的根因，2026-09-13）：修饰键与目标键必须**原子**地进输入流。四次独立调用时 `Ctrl` 的按下常常还没生效，`V`/`A` 就已经被目标处理 —— `Ctrl+V` 退化成裸字符 `V`、`Ctrl+A` 退化成裸 `A`。真机现象是「Word 里冒出一个 A」「记事本碰巧能用，Word / 浏览器 / 终端时灵时不灵」。**规划早期为躲开 `INPUT` 联合体的对齐坑而刻意选了 `keybd_event`，那个取舍正是这个 bug 的来源。** 对齐改由 `koffi.sizeof` 正面解决：x64 下 `INPUT` 实测为 **40 字节**，并已用自测断言钉住（`INPUT_SIZE === 40`，见 `app/electron/selftest/inject.js`）—— 尺寸写错 `SendInput` 只会返回 0，属于静默失效，不能只靠肉眼。
 
 **不做管理员窗口检测**：判定目标进程完整性级别要 `OpenProcess` + `GetTokenInformation` + 比较 SID，成本高于收益，而后果（静默失败）已列在 §0。
 
@@ -200,20 +200,22 @@ adopt():
 
 1. **koffi 能否在 Windows 与 macOS（arm64、打包版）加载并调用** —— 实施第一步。
    **结论（2026-09-13）**：**Windows 开发机与 Windows 打包版均已实测**——`koffi@3.2.1` 预编译安装、无编译器步骤；`koffi.load('user32.dll')` 成功；`GetForegroundWindow()` 返回真实 HWND（`uintptr_t` 返回 **`number`**，可直接 `!==` 比较；`void*` 返回 `bigint`）。
-   **打包版实测**：`npm run build && npx electron-builder --win --dir` 产出后，直接跑 `release/win-unpacked/VoicePilot.exe` 并带 `VP_INJECT_SELFTEST=1` → **17/17 通过、退出码 0**，其中 `captureTarget()` 在打包版内取到真实 HWND（`{"kind":"win","hwnd":393822}`）。**这证明 `.node` 确实从 asar 外被 dlopen 并调用成功**，不再只是「文件被移出去了」。
-   **仍未验**：macOS（arm64，从未执行过任何一行）、以及两个平台的**真实置前/粘贴**。验法与判据见 `docs/adopt-injection-test-runbook.md` 用例 7 与用例 1–2。
+   **打包版实测**：`npm run build && npx electron-builder --win --dir` 产出后，直接跑 `release/win-unpacked/VoicePilot.exe` 并带 `VP_INJECT_SELFTEST=1` → **17/17 通过、退出码 0**（该次运行的断言数；review 后追加 `INPUT` / `GUITHREADINFO` 两条结构体尺寸断言，当前共 **19** 项），其中 `captureTarget()` 在打包版内取到真实 HWND（`{"kind":"win","hwnd":393822}`）。**这证明 `.node` 确实从 asar 外被 dlopen 并调用成功**，不再只是「文件被移出去了」。
+   **仍未验**：macOS（arm64，从未执行过任何一行）、以及 macOS 的**真实置前/粘贴**。**Windows 的真实置前 + 粘贴已于 2026-09-13 真机通过**（Word / 浏览器 / 终端，光标留在目标应用），详见第 7 条与 runbook 状态表。验法与判据见 `docs/adopt-injection-test-runbook.md` 用例 7 与用例 1–2。
 2. **asarUnpack 是否生效**（smartUnpack 自动处理，还是需要显式配置）。
    **结论（2026-09-13）**：**已实测（Windows 开发机）**，且**必须显式配**。koffi 3.x 的原生二进制在 `node_modules/@koromix/koffi-<platform>-<arch>/`，**不在** `node_modules/koffi/`，所以只写 `node_modules/koffi/**` 是空操作。已改为 `["node_modules/koffi/**", "node_modules/@koromix/**"]`（`app/package.json`）。A/B 证据：`electron-builder --win --dir` + `-c.asar.smartUnpack=false`，旧 glob 下 `.node` 留在 asar 内（`unpacked=false`），新 glob 下移出（asar 缩小约 1.04 MB，与 `koffi.node` + `koffi.lib` 吻合），产物实测在 `release/win-unpacked/resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node`，1,036,800 B。
    ✅ **「应用能加载它」这一半也已在 Windows 打包版实测通过**（2026-09-13，见第 1 条）：打包版跑 `VP_INJECT_SELFTEST=1` 得 17/17、退出码 0，并在包内取到真实前台 HWND。**macOS arm64 的同一问题仍未验**，见第 3 条。
 3. **macOS arm64 上 `.node` 的 adhoc 签名**是否需要 afterPack 钩子。
    **结论（2026-09-13）**：**未验（需 Mac 真机 + 打包产物）**。当前**没有**加 afterPack 钩子。若打包版启动即报 koffi 加载失败，再加 `codesign -s -`；验法与降级判据见 runbook 用例 7 ②/降级条件。
 4. `SetForegroundWindow` 被前台锁拒绝的实际频率，以及 `AttachThreadInput` 兜底是否够用。
-   **结论（2026-09-13）**：**未验（需真机）**。开发机上只探过一次兜底路径要用的 `GetWindowThreadProcessId(hwnd, null)`，返回了合理线程 id、未抛异常；但**拒绝频率与兜底是否真能把窗口置前都没测过**。验法：runbook 用例 2 / 6a，观察是否报 `activate-failed`。
+   **结论（2026-09-13，Windows 真机日志）**：**在已观察到的运行里，兜底根本没有被用到** —— 前台窗口在约 **13–48ms** 内到位，`SetForegroundWindow` 直接成功，`AttachThreadInput` 分支未触发，也未复现 `activate-failed`。⚠️ 这只是**观测**，不是测得的拒绝频率：样本有限（真机试用数次），**不能据此删掉兜底分支**。macOS 侧走 `activateWithOptions:`，无此问题。完整验法仍是 runbook 用例 2 / 6a。
 5. `activateWithOptions:` 在新系统上已弃用，在 macOS 14+ 的实际行为需实测（必要时改用 `activateFromApplication:options:`）。
    **结论（2026-09-13）**：**未验（需 Mac 真机）**。实现已按「它会骗人」处理——**故意丢弃返回值**，成功判据只用「回读前台 pid」（`app/electron/inject/mac.js` 的 `msgSendBoolUPtr` 注释）。真机仍需确认两件事：① 它到底能不能把目标应用置前；② 若不能，是否改用 `activateFromApplication:options:`。
 6. **`objc_msgSend` 经 koffi 的脆弱度** —— 若不可用，走 §4.2 的 `open -b` 退路。
    **结论（2026-09-13）**：**未验（需 Mac 真机）**。macOS 实现自写出后**从未执行过**，以下全部待验：五个 `objc_msgSend` 声明（`msgSendPtr` / `msgSendI32` / `msgSendCStr` / `msgSendPtrI32` / `msgSendBoolUPtr`）的形状正确性；`AXIsProcessTrusted` 能否从 ApplicationServices umbrella framework 解析出符号（符号实际在 HIServices）；`frontPid()` 是否返回真实前台 pid；`pid === process.pid` 自守的前提（`frontmostApplication` 报的是我们主进程 pid）是否成立；`CGEventPost` 在授权后是否真的粘贴一次。全部通过前不得启用 `open -b` 退路，也不得改本决策。
 7. 置前与发键之间的间隔在各平台上定稿（Windows 60ms / macOS 120ms 是起点，不是承诺）。
-   **结论（2026-09-13）**：**未验（需真机）**，仍取起点值——Windows 60ms（`app/electron/inject/win.js`）、macOS 120ms（`app/electron/inject/mac.js`）。真机若出现「窗口置前了但按键发早/发晚」，按 runbook 记录现象后再调这两个常量。
+   **结论（2026-09-13，Windows 真机）**：**激活本身不是失败点** —— 实测前台到位约 **8–48ms**（远小于等待值），调大/调小 `ACTIVATE_WAIT_MS` 都不是关键旋钮。真正的失败是**我们自己的悬浮条拆条动作扰动掉了目标的激活/键盘焦点**，与这个间隔无关。修法已落地：置前目标**之前**先交出悬浮条的可聚焦性（拆条时那次 `setFocusable(false)` 因此成为空操作），并在成功后加一段 settle 延时（`VP_ADOPT_SETTLE_MS`，默认 250，见 `app/electron/ipc.js`）。
+   ⚠️ **这两处现在是承重的设计，不再是实现细节**：去掉任一处，真机上会分别出现「粘贴作废」或「粘贴成功但光标回不到目标」。
+   ⚠️ **仅在 Windows 测量**：macOS 的 120ms 与 settle 值都**未验**；Mac 上先试 `VP_ADOPT_SETTLE_MS=0` 判断是否还需要这段延时。
 8. 各失败 `reason` 对应的中文文案（三语齐全，走 `app/shared/i18n/*`）。
    **结论（2026-09-13）**：**已实测（Windows 开发机，自动化）**。5 个 `reason` 的三语文案已落在 `app/shared/i18n/{zh-CN,zh-TW,en-US}.js`，i18n 三语键齐自测通过；渲染层用显式映射（`app/src/App.tsx` 的 `ADOPT_FAIL_TEXT`）而不是拼 key，`permission` / `stale` 有独立文案，界面自测锁定了 zh-CN 原文。⚠️ **未验的是真机上能否分别触发到这几个 `reason`**（即失败归类的实际正确性），见 runbook 用例 1 / 3 / 6。

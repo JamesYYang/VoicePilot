@@ -15,14 +15,14 @@
 | `koffi@3.2.1` 预编译安装（无编译器步骤） | **已实测（Windows 开发机）** | `koffi.load('user32.dll')` 成功，`GetForegroundWindow()` 返回真实 HWND |
 | `uintptr_t` / `uint64_t` / `intptr_t` 返回值类型 | **已实测（Windows 开发机）** | 返回 **`number`**；`void*` 返回 `bigint`。HWND 直接用 `!==` 比较 |
 | asarUnpack 新 glob 让 `.node` 移出 asar | **已实测（Windows 开发机，A/B）** | `electron-builder --win --dir` + `-c.asar.smartUnpack=false`：旧 glob `node_modules/koffi/**` 不命中（koffi 3.x 的原生二进制在 `@koromix/koffi-<plat>-<arch>/`），`.node` 留在 asar 内；新 glob `@koromix/**` 命中，asar 缩小约 1.04 MB，产物落在 `app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node`（1,036,800 B） |
-| 自测（主进程注入 17/17、状态机 41/41、界面 88/88、i18n 三语键齐、typecheck 干净） | **已实测（Windows 开发机）** | 只覆盖纯函数 / 编排顺序 / 界面分支，**不含真实置前与粘贴** |
-| **真实置前 + 粘贴（记事本 / 浏览器 / 终端 / Office）** | **未验（Win 与 Mac 都没有）** | 本手册的核心内容 |
+| 自测（主进程注入 19/19、状态机 41/41、界面 88/88、i18n 三语键齐、typecheck 干净） | **已实测（Windows 开发机）** | 只覆盖纯函数 / 编排顺序 / 界面分支，**不含真实置前与粘贴**；注入套件含 `INPUT`(40B) / `GUITHREADINFO`(72B) 两条结构体尺寸断言 |
+| **真实置前 + 粘贴（记事本 / 浏览器 / 终端 / Office）** | **Windows 已验；macOS 未验** | 2026-09-13 Windows 真机：Word / 浏览器 / 终端采纳均写回成功，且**光标留在目标应用内**（无需再点一下）。macOS 仍未验 |
 | **整个 macOS 实现**（5 个 `objc_msgSend` 声明、`AXIsProcessTrusted` 符号解析、`frontPid()`、自守、`activateWithOptions:`、`CGEventPost`） | **未验（需 Mac 真机）** | macOS 上从未执行过 |
-| **打包版能否 `dlopen` 外置的 `.node`** | **Windows 已实测；macOS arm64 未验** | Windows：2026-09-13 从 HEAD 重打 `--dir` 包后直接跑 `release/win-unpacked/VoicePilot.exe`（带 `VP_INJECT_SELFTEST=1`）→ **17/17、退出码 0**，包内取到真实前台 HWND `{"kind":"win","hwnd":393822}` ⇒ `.node` 确实从 asar 外被 dlopen 并调用成功（不再只是「文件移动了」）。**macOS 同一问题仍未验**，见用例 7 ② |
+| **打包版能否 `dlopen` 外置的 `.node`** | **Windows 已实测；macOS arm64 未验** | Windows：2026-09-13 从 HEAD 重打 `--dir` 包后直接跑 `release/win-unpacked/VoicePilot.exe`（带 `VP_INJECT_SELFTEST=1`）→ **17/17（当时断言数）、退出码 0**，包内取到真实前台 HWND `{"kind":"win","hwnd":393822}` ⇒ `.node` 确实从 asar 外被 dlopen 并调用成功（不再只是「文件移动了」）。**macOS 同一问题仍未验**，见用例 7 ② |
 | **A2 回归**（新增 `start()` 时同步捕获后，聆听三态仍不抢焦点） | **未验（真机）** | 界面自测覆盖不到真实焦点 |
-| `SetForegroundWindow` 被前台锁拒绝的频率、`AttachThreadInput` 兜底是否够用 | **未验** | `GetWindowThreadProcessId(hwnd, null)` 只在开发机上探过一次，未抛异常、返回了合理线程 id |
+| `SetForegroundWindow` 被前台锁拒绝的频率、`AttachThreadInput` 兜底是否够用 | **已观测（Windows 真机）；未系统测量** | 真机日志显示前台在约 13–48ms 内到位、`SetForegroundWindow` 直接成功，**兜底未触发**；样本有限，不能据此删兜底 |
 
-> **本手册全部跑完之前，不得声称 Plan 2B 完成。** 未跑完的部分在汇报里一律写「未验」。
+> **Windows 侧的「真实置前 + 粘贴」已于 2026-09-13 真机通过**（本手册最有分量的一条，见状态表）。其余部分（macOS 全量、打包版 `dlopen` 的 Mac 侧、A2 真机回归等）**尚未跑完**，在汇报里一律写「未验」；全部打勾前不得声称 Plan 2B 完成。
 
 ---
 

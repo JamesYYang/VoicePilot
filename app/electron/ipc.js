@@ -36,8 +36,20 @@ const DEBUG_INJECT = process.env.VP_INJECT_DEBUG === '1';
 /**
  * 成功写回后、拆悬浮条之前要等多久（毫秒）。
  *
- * 默认 250：真机实测在 Word 上 200ms 已足够（不等 = 0/4 成功，等 200 = 4/4 成功），
- * 留一点余量。`VP_ADOPT_SETTLE_MS=<n>` 可覆盖，便于真机再调 ——
+ * **为什么要有这个等待**：渲染层拿到 `vp:adopt/paste` 的结果才会去关悬浮条，而拆条会
+ * 动我们自己窗口的状态。这个动作若与「目标应用消费粘贴」重叠，粘贴就会被扰动掉 ——
+ * 所以要让它晚于（而不是与）粘贴发生。
+ *
+ * **250 的来历，以及它现在的可信度**：这个数字来自一次真机实测（Word）：不等 = 0/4
+ * 成功，等 200ms = 4/4 成功。但那次测量**早于**「置前前先交出可聚焦性」的修改落地，
+ * 而那次修改已经让拆条里的 `setFocusable(false)` 变成空操作。也就是说：现在究竟还有
+ * 哪些拆条动作会扰动粘贴（`resetBarHeight` 改窗口尺寸？渲染层卸载？）**尚未重新测量**，
+ * 「等待让粘贴真的有机会落地」目前只是**假设**，不是已证实的机制。
+ *
+ * **想重新测**：用 `VP_ADOPT_SETTLE_MS=0` 跑真机，对比成败，再决定这个值是否还需要。
+ * ⚠️ 250 是在 **Windows** 上测的；macOS 一侧完全未验 —— Mac 试用者先试
+ * `VP_ADOPT_SETTLE_MS=0` 看是否仍成立。
+ *
  * 与仓库里既有的 `VP_*_DEBUG` 一类调试旋钮同一做法。
  */
 function settleMs() {
@@ -179,6 +191,24 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
 
     const before = await probeBar('发键前');
 
+    const bar = getBar();
+    const barAlive = () => bar && !bar.isDestroyed();
+
+    /**
+     * 切悬浮条的可聚焦性，并且**永远和 setSkipTaskbar(true) 成对**。
+     *
+     * setFocusable() 会触发 SWP_FRAMECHANGED；shell 收到 frame change 后会重新评估
+     * 这个窗口并重建它的任务栏按钮，从而抵消 skipTaskbar 已有的效果（f5e93f5 修过的
+     * 真 bug）。emit() 里每次切完都紧跟一次 setSkipTaskbar(true)，但采纳路径是直接
+     * 调的，绕过了那条成对逻辑 —— 而且成功后紧接着的 emit(idle) 会因为 isFocusable()
+     * 已等于目标值而整段跳过，那个 re-assert 永远等不到。所以这里也走成对入口。
+     */
+    const setBarFocusable = (focusable) => {
+      if (!barAlive()) return;
+      bar.setFocusable(focusable);
+      bar.setSkipTaskbar(true);
+    };
+
     // 先把自己的可聚焦性交出去，再动手置前目标。
     //
     // 为什么必须在**置前之前**：用户点「采纳」时悬浮条是可聚焦的（reviewing 态），
@@ -189,26 +219,38 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     //
     // 提前交出去之后，拆条时的这次变更就成了空操作（emit 里 isFocusable 相同则跳过），
     // 于是没人再去动目标的激活。失败时把可聚焦还回来 —— 用户还要在条里看提示并重试。
-    const bar = getBar();
-    const barAlive = () => bar && !bar.isDestroyed();
-    const hadFocus = barAlive() && bar.isFocusable();
-    if (hadFocus) bar.setFocusable(false);
-
-    const r = await pasteTo(machine.getTarget());
-
-    if (!r.ok && hadFocus && barAlive()) bar.setFocusable(true);
-
-    // ⚠️ 成功后**不能立刻返回**。
     //
-    // 渲染层拿到这个 promise 的结果才会去关悬浮条，而关闭路径会动我们自己的窗口状态
-    // （`setFocusable(false)` 触发 SWP_FRAMECHANGED + 尺寸复位）。这些在**我们的窗口**上
-    // 动手脚的操作会把激活从目标应用手里扰动走 —— 目标那边还没处理完的粘贴随之作废。
+    // 名字用 wasFocusable 而不是 hadFocus：isFocusable() 的语义是「这个窗口**允许**
+    // 被聚焦」，不是「用户此刻正聚焦在它上面」。
+    const wasFocusable = barAlive() && bar.isFocusable();
+    if (wasFocusable) setBarFocusable(false);
+
+    let r;
+    try {
+      r = await pasteTo(machine.getTarget());
+    } finally {
+      // ⚠️ 是否恢复**必须按当前状态**判断，不能拿上面的 wasFocusable 当条件。
+      // pasteTo 至少要等满一次激活等待（≥60ms），这期间状态可能已经离开 reviewing
+      // （用户点了关闭，或连按两次快捷键：reviewing → dismiss → idle → warming）。
+      // 那时再把 focusable 置回 true，悬浮条就会在 warming/listening 期间**可聚焦**，
+      // 直接违反 A2 —— 而 emit() 只在**下一次**状态广播时才重同步，拦不住这一次。
+      //
+      // 放在 finally 里是因为 pasteTo 若抛异常，今天那样会直接跳过恢复，用户在
+      // reviewing 里既不能编辑也不能重试。
+      if (!r?.ok && isBarFocusable(machine.getSnapshot()?.state)) setBarFocusable(true);
+    }
+
+    // ⚠️ 成功后**不能立刻返回**：渲染层拿到这个 promise 的结果才会去关悬浮条，
+    // 而拆条动作（尺寸复位、渲染层卸载等）若与「目标应用消费粘贴」重叠，就会把
+    // 激活/粘贴扰动掉。延后返回是为了让拆条**晚于**粘贴发生。
     //
     // 真机实测（Word，同一套代码，只差这个等待）：不等 = 0/4 成功；等 200ms = 4/4 成功。
     // 记事本粘贴极快所以一直能用，Word 的富文本剪贴板慢就赶不上 —— 「时灵时不灵」就是谁先到。
     //
-    // 语义上这不是「多睡一会儿」，而是：**成功 = 粘贴真的有机会落地**，
-    // 而不只是「按键发出去了」。只覆盖纯函数的判定无法表达这件事，所以放在这里。
+    // ⚠️ 那次测量**早于**「置前前先交出可聚焦性」的修改落地，所以当时被当成扰动源的
+    // 拆条 `setFocusable(false)` 如今已是空操作。剩下到底哪个拆条动作在扰动**尚未重测**
+    // —— 「等待 ⇒ 粘贴有机会落地」是**假设**而非已证实的机制。细节与重测方法见
+    // settleMs() 的注释。
     if (r.ok) await new Promise((res) => setTimeout(res, settleMs()));
 
     if (DEBUG_INJECT) {
