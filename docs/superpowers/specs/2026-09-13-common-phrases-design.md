@@ -317,9 +317,8 @@ settings.phraseShortcut.hint    '按下组合键即可修改唤起常用语的�
 | 自测 | 用例 |
 |---|---|
 | `app/electron/selftest/machine.js`（`VP_SM_SELFTEST=1`） | `openPhrases` 在**条获得焦点之前**捕获目标（注入假 `captureTarget` 断言调用时机）；非 `idle` 态按短语快捷键被忽略且不改状态；主快捷键在 `phrases` 态也被忽略；`usePhrase` 后 `origin='phrase'` 且 target 保留；`closePhrases` 后 `origin`/target 清空且 `activateTarget` 被调用一次；target 为 `null` 时不调 `activateTarget`；闸门 `shouldRestoreFocus` 返回 false 时不调 `activateTarget`；`#dismiss()` 在 `origin='phrase'` 时置前、在 `origin='dictation'` 时不置前；`start()` 把 `origin` 重置回 `'dictation'`；`onAudioFrame` 在 `phrases` 态不入队 |
-| `app/electron/selftest/store.js`（`VP_STORE_SELFTEST=1`） | phrases CRUD；`used_at` 影响排序（`COALESCE` 语义）；**旧库迁移断言**——用 `openStoreWithDb(旧 schema 实例)` 证明 phrases 表被自动建出 |
+| `app/electron/selftest/store.js`（`VP_STORE_SELFTEST=1`） | phrases CRUD；`used_at` 影响排序（`COALESCE` 语义）；**旧库迁移断言**——用 `openStoreWithDb(旧 schema 实例)` 证明 phrases 表被自动建出；`resolvePolishTarget` 三条：`undefined → pendingHistoryId`、`null → null`、`42 → 42` |
 | `app/electron/selftest/shortcut.js`（`VP_SHORTCUT_SELFTEST=1`） | 短语槽位的注册、冲突（占用时旧键不被注销）、挂起期注册必返回 false、非法 accelerator 抛异常被吞 |
-| `app/electron/selftest/polish.js`（`VP_POLISH_SELFTEST=1`） | `resolvePolishTarget` 三条：`undefined → pendingHistoryId`、`null → null`、`42 → 42` |
 | `app/src/uitest/run.tsx`（`VP_UI_SELFTEST=1`） | `derivePhraseTitle` 边界（空串 / 单行 / 多行 / 恰好 40 与 41 字符 / 首行全空白）；选择器键盘导航（↑↓ 移动高亮并 preventDefault）、Enter 选中、Esc 关闭、空库/无匹配占位；选中后 `origin='phrase'` 时**不调** `historySave`、而 `origin='dictation'` 时照调；条内「存为常用语」按钮存入的是 `effectiveText` 而不是编辑区原文；Studio 常用语页 CRUD |
 
 **跑界面自测前必须先 `npm run build`**（`npm run build && VP_UI_SELFTEST=1 npx electron .`），否则跑的是 `app/dist/renderer` 里的旧产物——这条既有教训在 i18n 那期已经踩过。
@@ -335,8 +334,8 @@ settings.phraseShortcut.hint    '按下组合键即可修改唤起常用语的�
 | 文档 | 改动 |
 |---|---|
 | 本文件 | 新增 |
-| `docs/plans/2026-09-05-voicepilot-prd.md` | **✅ 已完成（2026-09-13，实现区间 `648987a…2c5b193`）**：新增 **F16**「常用语」条目与第二个全局快捷键（版本升至 v1.9）。**F14/F15 已被「翻译」「导出 PDF」占用**，编号绕开 |
-| `README.md` | **✅ 已完成（2026-09-13，同一实现区间）**：形态表 / 核心流程 / 默认快捷键 / 已知限制各同步一处，并链到 `docs/common-phrases-test-runbook.md` |
+| `docs/plans/2026-09-05-voicepilot-prd.md` | **✅ 已完成（2026-09-13，随实现区间 `648987a…2c5b193` 之后同步）**：新增 **F16**「常用语」条目与第二个全局快捷键（版本升至 v1.9）。**F14/F15 已被「翻译」「导出 PDF」占用**，编号绕开 |
+| `README.md` | **✅ 已完成（2026-09-13，随实现区间 `648987a…2c5b193` 之后同步）**：形态表 / 核心流程 / 默认快捷键 / 已知限制各同步一处，并链到 `docs/common-phrases-test-runbook.md` |
 | `docs/superpowers/specs/2026-09-12-trial-feedback-design.md` | **✅ 已完成（2026-09-13，实现区间 `648987a…2c5b193`）**：§1 补了第 6 条反馈（常用语）的落点指针，指向本文件 |
 | `docs/superpowers/specs/2026-09-13-adopt-injection-design.md` | **✅ 已完成（2026-09-13，实现区间 `648987a…2c5b193`）**：§3 按 §2.5 的修复补上了 `adoptPolish` 的显式 `null` 语义 |
 
