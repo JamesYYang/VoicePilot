@@ -29,8 +29,8 @@
 | 文件 | 职责 |
 |---|---|
 | `app/electron/inject/index.js` | 平台分派、`captureTarget`、`pasteTo`、`classifyForeground`（纯函数）。**不含任何平台代码**，静态 import 两个平台实现 |
-| `app/electron/inject/win.js` | koffi → `user32.dll`：`GetForegroundWindow` / `SetForegroundWindow` / `ShowWindow` / `AttachThreadInput` / `keybd_event` |
-| `app/electron/inject/mac.js` | koffi → `libobjc`（`objc_msgSend`）/ CoreGraphics（`CGEvent*`）/ ApplicationServices（`AXIsProcessTrusted`） |
+| `app/electron/inject/win.js` | koffi → `user32.dll`：`GetForegroundWindow` / `SetForegroundWindow` / `ShowWindow` / `AttachThreadInput` / `keybd_event`。导出 `captureTarget` / `activate` / `sendPaste` |
+| `app/electron/inject/mac.js` | koffi → `libobjc`（`objc_msgSend`）/ CoreGraphics（`CGEvent*`）/ ApplicationServices（`AXIsProcessTrusted`）。导出 `captureTarget` / `activate` / `sendPaste` |
 | `app/electron/selftest/inject.js` | 注入层自测入口（`VP_INJECT_SELFTEST`） |
 | `docs/adopt-injection-test-runbook.md` | 真机验证清单（Task 8） |
 
@@ -374,7 +374,13 @@ git commit -m "feat(inject): 平台分派 + Windows 捕获前台窗口 + 置前�
 
 **Interfaces:**
 - Consumes: Task 2 的 `Target` / `classifyForeground`
-- Produces: `pasteTo(target: Target | null): Promise<{ ok: true } | { ok: false; reason: string }>`（`inject/index.js` 导出）
+- Produces:
+  - `inject/index.js`：`pasteTo(target: Target | null): Promise<{ ok: true } | { ok: false; reason: string }>`
+  - `inject/index.js`：`pasteWith(platform, target)` —— 同一编排，但平台实现是参数，便于自测驱动「确认失败就不发键」这条安全属性
+  - 平台模块（本 Task 是 `win.js`）导出**两个原语**，不是单个 `pasteTo`：
+    - `activate(target): Promise<{ ok: true; id: number } | { ok: false; reason: string }>` —— 只切前台并回读
+    - `sendPaste(): void` —— 只发粘贴键（Windows `keybd_event` / macOS `CGEventPost`）
+  - 「确认到前台 → 发键」的先后由 `index.js` 一处编排；Task 4 必须照同一形状实现
 
 - [ ] **Step 1: 扩充 `inject/win.js`**
 
@@ -429,8 +435,15 @@ function readForeground() {
   return hwnd ? hwnd : null;
 }
 
-/** 发一次 Ctrl+V。keybd_event 返回 void，所以只能靠「有没有抛」判断失败。 */
-function sendCtrlV() {
+/**
+ * 发一次 Ctrl+V。**由 index.js 在确认目标窗口已到前台之后调用**（见 Step 2）。
+ * keybd_event 返回 void，所以只能靠「有没有抛」判断失败。
+ *
+ * 单独成一个原语、而不是塞进 activate() 里：发键必须发生在「回读确认目标确实到了
+ * 前台」**之后**。若在确认之前发，置前失败时这串按键会落到当时的前台窗口上 ——
+ * 用户的文本就被粘进了一个无关的应用。
+ */
+export function sendPaste() {
   const a = lib();
   a.keybd_event(VK_CONTROL, 0, 0, 0);
   a.keybd_event(VK_V, 0, 0, 0);
@@ -439,13 +452,14 @@ function sendCtrlV() {
 }
 
 /**
- * 把前台切到目标窗口。**调用方必须已经写好剪贴板**。
+ * 把前台切到目标窗口，并回读一次实际的前台句柄。
+ * **只切前台，不发键** —— 发键由 index.js 在判定通过后调 sendPaste()（见 Step 2）。
  *
- * 这里**不自己判定成功**，只回读一次前台句柄交给 index.js 用 classifyForeground 判 ——
+ * 这里**不自己判定成功**，只回读句柄交给 index.js 用 classifyForeground 判 ——
  * 判定逻辑做成纯函数才有自测（真实的置前没法自动验，spec §6）。
  * 成功判据是「目标窗口确实到了前台」，不是「粘贴被消费了」—— 后者不可检（spec §3）。
  */
-export async function pasteTo(target) {
+export async function activate(target) {
   // 平台实现自己守 kind：index.js 只按平台分派，不做形状校验（它不该认识 Target 的细节）。
   // 少了这一行，Windows 上拿到 mac 形状的目标会去解构不存在的 hwnd。
   if (target?.kind !== 'win') return { ok: false, reason: 'no-target' };
@@ -490,28 +504,111 @@ export async function pasteTo(target) {
  * 后者原理上不可检（发键 API 只报告事件入队，不报告目标应用是否处理）。
  * 管理员权限窗口（Windows UIPI）会因此静默失败，这是 spec §0 已接受的代价。
  */
-export async function pasteTo(target) {
-  if (!impl || !target) return { ok: false, reason: 'no-target' };
+/**
+ * 编排：切前台 → 回读确认 → **只有确认通过才发键**。
+ *
+ * 写成「接 platform 参数」而不是直接吃模块级的 impl，是为了能被自测驱动：这条顺序
+ * 约束是**安全属性**而非风格 —— 发早了，那串按键会落到当时的前台窗口上，用户的文本
+ * 就被粘进了无关的应用。真机验一次不能防回归，必须是可自动跑的断言。
+ */
+export async function pasteWith(platform, target) {
+  if (!platform || !target) return { ok: false, reason: 'no-target' };
   try {
-    const r = await impl.pasteTo(target);
-    if (!r?.ok) return { ok: false, reason: r?.reason ?? 'send-failed' };
+    const a = await platform.activate(target);
+    if (!a?.ok) return { ok: false, reason: a?.reason ?? 'activate-failed' };
+
     // 平台实现回读到的前台标识。Windows 是 HWND(number)，macOS 是 pid(number)。
-    const cls = classifyForeground(target.hwnd ?? target.pid, r.id);
-    return cls.ok ? { ok: true } : cls;
+    const cls = classifyForeground(target.hwnd ?? target.pid, a.id);
+    if (!cls.ok) return cls;
+
+    platform.sendPaste();
+    return { ok: true };
   } catch (e) {
     console.warn(`[注入] 粘贴失败：${e?.message ?? e}`);
     return { ok: false, reason: 'send-failed' };
   }
 }
+
+/**
+ * 把剪贴板内容粘贴到 target。**调用方必须先写好剪贴板**（渲染进程经 vp:copy）。
+ *
+ * 成功判据 = 「目标窗口确实到了前台」。这不是「粘贴被消费了」的判据 ——
+ * 后者原理上不可检（发键 API 只报告事件入队，不报告目标应用是否处理）。
+ * 管理员权限窗口（Windows UIPI）会因此静默失败，这是 spec §0 已接受的代价。
+ */
+export function pasteTo(target) {
+  return pasteWith(impl, target);
+}
 ```
 
-> `index.js` 的 `pasteTo` 用 `target.hwnd ?? target.pid` 取「目标标识」，因此 Windows 传 HWND、macOS 传 pid，都是同一行。**Task 4 的 macOS 实现复用这里，不需要再改。**
+> `index.js` 的 `pasteTo` 用 `target.hwnd ?? target.pid` 取「目标标识」，因此 Windows 传 HWND、macOS 传 pid，都是同一行。
+>
+> **平台模块必须导出两个原语 —— `activate(target)` 与 `sendPaste()` —— 而不是一个 `pasteTo`。** 这样「确认到前台」与「发键」的先后由 `index.js` 一处编排（`pasteWith`），纯函数判定也留在 `index.js`（有自测）。**Task 4 的 macOS 实现必须照这个形状写**（`activate` + `sendPaste`），不要写成单个 `pasteTo`，也**不要改 `index.js`**。
 
 - [ ] **Step 3: 加自测断言**
 
 `app/electron/selftest/inject.js` 里，在 `const failed = results.filter(...)` **之前**追加：
 
 ```js
+  // ---- 编排顺序：确认到前台之前**绝不能发键** ----
+  // 这是安全属性不是风格：发早了，Ctrl+V 会落到当时的前台窗口上，用户的文本就被粘进
+  // 无关的应用。用假 platform 驱动 pasteWith，把这条顺序钉死。
+  const mkPlatform = (activateResult) => {
+    const calls = { activate: 0, send: 0 };
+    return {
+      calls,
+      platform: {
+        activate: async () => {
+          calls.activate += 1;
+          return activateResult;
+        },
+        sendPaste: () => {
+          calls.send += 1;
+        },
+      },
+    };
+  };
+
+  const failAct = mkPlatform({ ok: false, reason: 'permission' });
+  const rFailAct = await pasteWith(failAct.platform, { kind: 'win', hwnd: 1 });
+  check('activate 失败 → 透传 reason 且**一次键都不发**',
+    rFailAct?.reason === 'permission' && failAct.calls.send === 0,
+    JSON.stringify({ r: rFailAct, send: failAct.calls.send }));
+
+  const mismatched = mkPlatform({ ok: true, id: 2 });
+  const rMismatch = await pasteWith(mismatched.platform, { kind: 'win', hwnd: 1 });
+  check('回读到的前台不是目标 → activate-failed 且**一次键都不发**',
+    rMismatch?.reason === 'activate-failed' && mismatched.calls.send === 0,
+    JSON.stringify({ r: rMismatch, send: mismatched.calls.send }));
+
+  const good = mkPlatform({ ok: true, id: 1 });
+  const rGood = await pasteWith(good.platform, { kind: 'win', hwnd: 1 });
+  check('确认通过 → ok 且恰好发一次键',
+    rGood?.ok === true && good.calls.send === 1,
+    JSON.stringify({ r: rGood, send: good.calls.send }));
+
+  const noTarget = mkPlatform({ ok: true, id: 1 });
+  const rNoTarget = await pasteWith(noTarget.platform, null);
+  check('target 为 null → no-target 且一次键都不发（也不调 activate）',
+    rNoTarget?.reason === 'no-target' && noTarget.calls.activate === 0 && noTarget.calls.send === 0,
+    JSON.stringify({ r: rNoTarget, calls: noTarget.calls }));
+
+  const throwing = {
+    calls: { send: 0 },
+    platform: {
+      activate: async () => {
+        throw new Error('boom');
+      },
+      sendPaste: () => {
+        throwing.calls.send += 1;
+      },
+    },
+  };
+  const rThrow = await pasteWith(throwing.platform, { kind: 'win', hwnd: 1 });
+  check('activate 抛异常 → send-failed 且**不发键**（不得把异常漏给调用方）',
+    rThrow?.reason === 'send-failed' && throwing.calls.send === 0,
+    JSON.stringify({ r: rThrow, send: throwing.calls.send }));
+
   // ---- pasteTo 的入口守卫（真实置前与发键没法自动验）----
   const noTargetMac = await pasteTo(null);
   check('pasteTo(null) → no-target', noTargetMac?.reason === 'no-target',
@@ -529,7 +626,7 @@ export async function pasteTo(target) {
 并把顶部 import 改为：
 
 ```js
-import { captureTarget, classifyForeground, pasteTo } from '../inject/index.js';
+import { captureTarget, classifyForeground, pasteTo, pasteWith } from '../inject/index.js';
 ```
 
 - [ ] **Step 4: 运行**
@@ -559,7 +656,8 @@ git commit -m "feat(inject): Windows 置前（含 AttachThreadInput 兜底）+ �
 
 **Interfaces:**
 - Consumes: Task 2 的 `Target` / `classifyForeground`
-- Produces: `mac.captureTarget(): Target | null`、`mac.pasteTo(target): Promise<{ ok: true; id: number } | { ok: false; reason: string }>`
+- Produces: `mac.captureTarget(): Target | null`、`mac.activate(target): Promise<{ ok: true; id: number } | { ok: false; reason: string }>`、`mac.sendPaste(): void`
+  - **必须是 `activate` + `sendPaste` 两个原语，不是单个 `pasteTo`** —— 与 Task 3 的 Windows 侧同形，「确认到前台 → 才发键」的先后由 `index.js` 编排。
 
 - [ ] **Step 1: 实现 `inject/mac.js`**
 
@@ -691,8 +789,11 @@ export function captureTarget() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** 发一次 Cmd+V。事件创建出来必须 CFRelease，否则每采纳一次泄漏一个事件。 */
-function sendCmdV() {
+/**
+ * 发一次 Cmd+V。**由 index.js 在确认目标应用已到前台之后调用**（与 Windows 同形）。
+ * 事件创建出来必须 CFRelease，否则每采纳一次泄漏一个事件。
+ */
+export function sendPaste() {
   const a = lib();
   for (const keyDown of [true, false]) {
     const ev = a.CGEventCreateKeyboardEvent(null, VK_V, keyDown);
@@ -703,9 +804,15 @@ function sendCmdV() {
   }
 }
 
-export async function pasteTo(target) {
+/**
+ * 把目标应用切到前台并回读一次实际的前台 pid。**只切前台，不发键** ——
+ * 发键由 index.js 在判定通过后调 sendPaste()。
+ *
+ * 单独成原语的理由与 Windows 侧相同：若在确认之前发键，激活失败时 Cmd+V 会落到
+ * 当时的前台应用上，用户的文本就被粘进了无关的窗口。
+ */
+export async function activate(target) {
   // 平台实现自己守 kind：index.js 只按平台分派，不做形状校验（它不该认识 Target 的细节）。
-  // 少了这一行，Windows 上拿到 mac 形状的目标会去解构不存在的 hwnd。
   if (target?.kind !== 'mac') return { ok: false, reason: 'no-target' };
 
   const a = lib();
@@ -727,9 +834,11 @@ export async function pasteTo(target) {
 
 > **降级退路（不是默认，只在实测否决 ObjC 方案后启用）**：若 `objc_msgSend` 那五个声明怎么调都不对，激活改用 `/usr/bin/open -b <bundleId>`（免 ObjC，只起一个进程），发键仍用 `CGEventPost`。代价是多窗口应用可能被拉到别的窗口，与「目标窗口 = 触发那刻的前台窗口」不完全一致。**启用它必须回 spec §4.2 改决策**，不要在实现里偷偷换。
 
-- [ ] **Step 2: `index.js` 的 `pasteTo` 已兼容 macOS**
+- [ ] **Step 2: 确认 `index.js` 的编排认得 macOS**
 
-Task 3 写的 `classifyForeground(target.hwnd ?? target.pid, r.id)` 对 macOS 走 `target.pid`，无需改动。**确认这一点**（读一遍 `inject/index.js` 的 `pasteTo`），若 Task 3 的实现只取了 `hwnd`，改成上面这版。
+Task 3 写的 `index.js` 的 `pasteTo` 是：`impl.activate(target)` → `classifyForeground(target.hwnd ?? target.pid, a.id)` → `impl.sendPaste()`。对 macOS 它走 `target.pid`，并且调用 `mac.activate` / `mac.sendPaste`。
+
+**读一遍 `app/electron/inject/index.js` 确认这三行都在**；`mac.js` 必须导出同名的 `activate` 与 `sendPaste`（本 Task 的 Step 1 已经这么写了），否则 `index.js` 会在运行时抛 `impl.activate is not a function`。**不要去改 `index.js`** —— 两侧形状由 Task 3 定稿。
 
 - [ ] **Step 3: 扩展自测（Windows 上验不到真实行为，但要验「不抛 + 形状」）**
 
