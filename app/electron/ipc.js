@@ -11,6 +11,7 @@ import { saveCredentials } from './asr/config.js';
 import { listPresets, savePreset, deletePreset, getMeta, setMeta, saveHistory, listHistory, getHistory, updateHistoryPolish, updateHistoryText, deleteHistory, getShortcut, setShortcut } from './store.js';
 import { streamPolish } from './llm/polish.js';
 import { applyShortcut, currentAccel, defaultAccel, setShortcutSuspended } from './shortcut.js';
+import { pasteTo } from './inject/index.js';
 
 /**
  * 所有 IPC 的注册点。main.js 只管应用外壳（窗口、托盘、快捷键、生命周期），
@@ -121,6 +122,15 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
       return false;
     }
   });
+
+  /**
+   * 采纳写回：把剪贴板里的文本粘到「快捷键触发那一刻的前台窗口」。
+   *
+   * 剪贴板由渲染进程先经 vp:copy 写好，这里只负责置前 + 发粘贴键 ——
+   * 这样「复制」与「采纳」共用同一条剪贴板写入路径，不会出现两边写的内容不一致。
+   * **不还原剪贴板**（spec §0 决策 2）。
+   */
+  ipcMain.handle('vp:adopt/paste', () => pasteTo(machine.getTarget()));
 
   // ---------------------------------------------------------------- 通用
 

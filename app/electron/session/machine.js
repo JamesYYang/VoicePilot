@@ -5,6 +5,7 @@ import { LatencyMetrics, formatSummary } from '../telemetry/metrics.js';
 import { t } from '../../shared/i18n/index.js';
 import { getCurrentLocale } from '../locale.js';
 import { toTraditional } from '../i18n/zh-convert.js';
+import { captureTarget as defaultCaptureTarget } from '../inject/index.js';
 
 /**
  * 听写会话状态机（PRD §4.1）。跑在主进程，是唯一的状态源；渲染进程只负责显示。
@@ -63,6 +64,8 @@ export class SessionMachine {
   #backoffMs = BACKOFF_MS;
   #createSession;
   #fixedCreds = null;
+  #captureTarget;
+  #target = null;
 
   /**
    * @param emit          向渲染进程推送
@@ -78,6 +81,7 @@ export class SessionMachine {
     backoffMs = BACKOFF_MS,
     createSession,
     credentials,
+    captureTarget,
   }) {
     this.#emit = emit;
     this.maxAttempts = maxAttempts;
@@ -85,6 +89,9 @@ export class SessionMachine {
     this.#createSession = createSession ?? ((opts) => new AsrSession(opts));
     // 显式给了凭据就不再去读 .env —— 自测不该依赖开发者机器上的 .env 是否存在
     this.#fixedCreds = credentials ?? null;
+    // 与 createSession 同一个注入手法：生产用真实现，自测注入假的。
+    // 不把平台代码写进状态机 —— 这里只认「一个返回 Target|null 的函数」。
+    this.#captureTarget = captureTarget ?? defaultCaptureTarget;
   }
 
   get state() {
@@ -99,6 +106,11 @@ export class SessionMachine {
   /** 渲染进程挂载时拉一次当前状态，避免错过它启动之前的那次状态广播。 */
   getSnapshot() {
     return { state: this.#state, notice: this.#notice, truncated: this.#truncated };
+  }
+
+  /** 快捷键触发那一刻的前台窗口。采纳时用它作为写回目标。 */
+  getTarget() {
+    return this.#target;
   }
 
   // ------------------------------------------------------------ 外部输入
@@ -132,6 +144,9 @@ export class SessionMachine {
     this.#lastDurationMs = null;
     this.#queue.clear();
     this.#lastSeqSent = 0;
+    // 必须在进 warming 之前捕获：那之后悬浮条开始渲染，前台随时可能变成我们自己。
+    // 也要在凭据校验之后 —— 校验失败会直接 return，那时不该留下一个陈旧目标。
+    this.#target = this.#captureTarget();
     this.#setState('warming');
 
     this.#startDrainTimer();
@@ -202,6 +217,7 @@ export class SessionMachine {
     this.#session?.abort();
     this.#session = null;
     this.#queue.clear();
+    this.#target = null;
     this.#stopDrainTimer();
     this.#clearRetry();
     this.#setState('idle');
@@ -248,6 +264,7 @@ export class SessionMachine {
 
   #dismiss() {
     this.#queue.clear();
+    this.#target = null;
     this.#setState('idle');
   }
 

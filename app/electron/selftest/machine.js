@@ -258,6 +258,55 @@ async function testBarFocusable() {
   check('draining 不可聚焦（A2 硬约束）', isBarFocusable('draining') === false);
 }
 
+// ---------------------------------------------------------------- 采纳目标窗口
+
+/**
+ * 采纳写回的目标窗口：捕获时机与生命周期。
+ * 捕获**必须在进 warming 之前**发生 —— 那之后悬浮条开始渲染，前台可能变成我们自己。
+ */
+async function testCaptureTarget() {
+  console.log('\n[8] 采纳目标窗口：捕获时机与生命周期');
+
+  let calls = 0;
+  let stateAtCapture = null;
+  let session = null;
+  const holder = {};
+  const m = new SessionMachine({
+    emit() {},
+    // 会话卡在建立中：start() 才会停在 warming，第二次 toggle 才走「取消」路径。
+    // 不 hold 的话 start() 直接进 listening，toggle 会变成 stop → reviewing，
+    // 那验的就是别的生命周期了。
+    createSession: () => {
+      session = new FakeSession({});
+      session.startHeld = true;
+      return session;
+    },
+    credentials: {},
+    captureTarget: () => {
+      calls += 1;
+      stateAtCapture = holder.m.state;
+      return { kind: 'win', hwnd: 7 };
+    },
+  });
+  holder.m = m;
+
+  // 不能 await：会话被 hold，await 会一直挂住 —— 而 warming 恰恰就是这段等待窗。
+  // 捕获跑在第一个 await 之前，所以这一行调用后目标就已经取好了。
+  const pending = m.start();
+  await tick();
+  check('start 时捕获一次', calls === 1, `捕获 ${calls} 次`);
+  check('捕获发生在进 warming 之前', stateAtCapture === 'idle', String(stateAtCapture));
+  check('目标已持有', m.getTarget() !== null, JSON.stringify(m.getTarget()));
+
+  await m.toggle(); // warming → 取消
+  check('取消后清空目标', m.getTarget() === null, JSON.stringify(m.getTarget()));
+  check('取消后回到 idle', m.state === 'idle', m.state);
+
+  // 放行被取消的会话，让 start() 的 promise 收尾，别留下悬挂的 pending
+  session.releaseStart();
+  await pending;
+}
+
 export async function runMachineSelftest() {
   console.log('=== 状态机与背压自测 ===');
 
@@ -268,6 +317,7 @@ export async function runMachineSelftest() {
   await testNonRetryableError();
   await testBackpressure();
   await testBarFocusable();
+  await testCaptureTarget();
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n共 ${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

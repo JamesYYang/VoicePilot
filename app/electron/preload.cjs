@@ -86,6 +86,15 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:copy', text);
   },
 
+  /**
+   * 采纳写回：把剪贴板内容粘到「快捷键触发那一刻的前台窗口」。
+   * **调用前必须先用 copy() 把文本写进剪贴板。**
+   * 返回 { ok:true } 或 { ok:false, reason }。
+   */
+  adoptPaste() {
+    return ipcRenderer.invoke('vp:adopt/paste');
+  },
+
   /** @param cb 收到 (state, notice, truncated) */
   onState(cb) {
     return subscribe('vp:state', cb);

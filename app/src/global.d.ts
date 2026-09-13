@@ -51,6 +51,14 @@ interface VoicePilotBridge {
   reportPainted(atEpochMs: number): void;
   /** 写入剪贴板，返回是否成功。覆盖，不恢复原内容 */
   copy(text: string): Promise<boolean>;
+  /**
+   * 采纳写回：把剪贴板内容粘到「快捷键触发那一刻的前台窗口」。
+   * 调用前必须先用 copy() 写好剪贴板。失败时 reason 说明原因。
+   */
+  adoptPaste(): Promise<
+    | { ok: true }
+    | { ok: false; reason: 'no-target' | 'stale' | 'activate-failed' | 'send-failed' | 'permission' }
+  >;
   onState(cb: (s: SessionSnapshot) => void): () => void;
   onPartial(cb: (p: AsrPartial) => void): () => void;
   onError(cb: (e: { kind: string; message: string; preserveText: boolean }) => void): () => void;
