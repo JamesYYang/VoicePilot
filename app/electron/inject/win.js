@@ -62,8 +62,15 @@ function readForeground() {
   return hwnd ? hwnd : null;
 }
 
-/** 发一次 Ctrl+V。keybd_event 返回 void，所以只能靠「有没有抛」判断失败。 */
-function sendCtrlV() {
+/**
+ * 发一次 Ctrl+V。**由 index.js 在确认目标窗口已到前台之后调用**（见 Step 2）。
+ * keybd_event 返回 void，所以只能靠「有没有抛」判断失败。
+ *
+ * 单独成一个原语、而不是塞进 activate() 里：发键必须发生在「回读确认目标确实到了
+ * 前台」**之后**。若在确认之前发，置前失败时这串按键会落到当时的前台窗口上 ——
+ * 用户的文本就被粘进了一个无关的应用。
+ */
+export function sendPaste() {
   const a = lib();
   a.keybd_event(VK_CONTROL, 0, 0, 0);
   a.keybd_event(VK_V, 0, 0, 0);
@@ -72,13 +79,14 @@ function sendCtrlV() {
 }
 
 /**
- * 把前台切到目标窗口。**调用方必须已经写好剪贴板**。
+ * 把前台切到目标窗口，并回读一次实际的前台句柄。
+ * **只切前台，不发键** —— 发键由 index.js 在判定通过后调 sendPaste()（见 Step 2）。
  *
- * 这里**不自己判定成功**，只回读一次前台句柄交给 index.js 用 classifyForeground 判 ——
+ * 这里**不自己判定成功**，只回读句柄交给 index.js 用 classifyForeground 判 ——
  * 判定逻辑做成纯函数才有自测（真实的置前没法自动验，spec §6）。
  * 成功判据是「目标窗口确实到了前台」，不是「粘贴被消费了」—— 后者不可检（spec §3）。
  */
-export async function pasteTo(target) {
+export async function activate(target) {
   // 平台实现自己守 kind：index.js 只按平台分派，不做形状校验（它不该认识 Target 的细节）。
   // 少了这一行，Windows 上拿到 mac 形状的目标会去解构不存在的 hwnd。
   if (target?.kind !== 'win') return { ok: false, reason: 'no-target' };
@@ -107,6 +115,5 @@ export async function pasteTo(target) {
   }
 
   await sleep(ACTIVATE_WAIT_MS);
-  sendCtrlV();
   return { ok: true, id: readForeground() };
 }

@@ -1,5 +1,5 @@
 import koffi from 'koffi';
-import { captureTarget, classifyForeground, pasteTo } from '../inject/index.js';
+import { captureTarget, classifyForeground, pasteTo, pasteWith } from '../inject/index.js';
 
 /**
  * 注入层自测。
@@ -72,6 +72,65 @@ export async function runInjectSelftest() {
   check('captureTarget() 返回 null 或 {kind, ...}',
     captured === null || (captured && typeof captured.kind === 'string'),
     JSON.stringify(captured));
+
+  // ---- 编排顺序：确认到前台之前**绝不能发键** ----
+  // 这是安全属性不是风格：发早了，Ctrl+V 会落到当时的前台窗口上，用户的文本就被粘进
+  // 无关的应用。用假 platform 驱动 pasteWith，把这条顺序钉死。
+  const mkPlatform = (activateResult) => {
+    const calls = { activate: 0, send: 0 };
+    return {
+      calls,
+      platform: {
+        activate: async () => {
+          calls.activate += 1;
+          return activateResult;
+        },
+        sendPaste: () => {
+          calls.send += 1;
+        },
+      },
+    };
+  };
+
+  const failAct = mkPlatform({ ok: false, reason: 'permission' });
+  const rFailAct = await pasteWith(failAct.platform, { kind: 'win', hwnd: 1 });
+  check('activate 失败 → 透传 reason 且**一次键都不发**',
+    rFailAct?.reason === 'permission' && failAct.calls.send === 0,
+    JSON.stringify({ r: rFailAct, send: failAct.calls.send }));
+
+  const mismatched = mkPlatform({ ok: true, id: 2 });
+  const rMismatch = await pasteWith(mismatched.platform, { kind: 'win', hwnd: 1 });
+  check('回读到的前台不是目标 → activate-failed 且**一次键都不发**',
+    rMismatch?.reason === 'activate-failed' && mismatched.calls.send === 0,
+    JSON.stringify({ r: rMismatch, send: mismatched.calls.send }));
+
+  const good = mkPlatform({ ok: true, id: 1 });
+  const rGood = await pasteWith(good.platform, { kind: 'win', hwnd: 1 });
+  check('确认通过 → ok 且恰好发一次键',
+    rGood?.ok === true && good.calls.send === 1,
+    JSON.stringify({ r: rGood, send: good.calls.send }));
+
+  const noTarget = mkPlatform({ ok: true, id: 1 });
+  const rNoTarget = await pasteWith(noTarget.platform, null);
+  check('target 为 null → no-target 且一次键都不发（也不调 activate）',
+    rNoTarget?.reason === 'no-target' && noTarget.calls.activate === 0 && noTarget.calls.send === 0,
+    JSON.stringify({ r: rNoTarget, calls: noTarget.calls }));
+
+  const throwing = {
+    calls: { send: 0 },
+    platform: {
+      activate: async () => {
+        throw new Error('boom');
+      },
+      sendPaste: () => {
+        throwing.calls.send += 1;
+      },
+    },
+  };
+  const rThrow = await pasteWith(throwing.platform, { kind: 'win', hwnd: 1 });
+  check('activate 抛异常 → send-failed 且**不发键**（不得把异常漏给调用方）',
+    rThrow?.reason === 'send-failed' && throwing.calls.send === 0,
+    JSON.stringify({ r: rThrow, send: throwing.calls.send }));
 
   // ---- pasteTo 的入口守卫（真实置前与发键没法自动验）----
   const noTargetMac = await pasteTo(null);

@@ -43,16 +43,38 @@ export function captureTarget() {
  * 后者原理上不可检（发键 API 只报告事件入队，不报告目标应用是否处理）。
  * 管理员权限窗口（Windows UIPI）会因此静默失败，这是 spec §0 已接受的代价。
  */
-export async function pasteTo(target) {
-  if (!impl || !target) return { ok: false, reason: 'no-target' };
+/**
+ * 编排：切前台 → 回读确认 → **只有确认通过才发键**。
+ *
+ * 写成「接 platform 参数」而不是直接吃模块级的 impl，是为了能被自测驱动：这条顺序
+ * 约束是**安全属性**而非风格 —— 发早了，那串按键会落到当时的前台窗口上，用户的文本
+ * 就被粘进了无关的应用。真机验一次不能防回归，必须是可自动跑的断言。
+ */
+export async function pasteWith(platform, target) {
+  if (!platform || !target) return { ok: false, reason: 'no-target' };
   try {
-    const r = await impl.pasteTo(target);
-    if (!r?.ok) return { ok: false, reason: r?.reason ?? 'send-failed' };
+    const a = await platform.activate(target);
+    if (!a?.ok) return { ok: false, reason: a?.reason ?? 'activate-failed' };
+
     // 平台实现回读到的前台标识。Windows 是 HWND(number)，macOS 是 pid(number)。
-    const cls = classifyForeground(target.hwnd ?? target.pid, r.id);
-    return cls.ok ? { ok: true } : cls;
+    const cls = classifyForeground(target.hwnd ?? target.pid, a.id);
+    if (!cls.ok) return cls;
+
+    platform.sendPaste();
+    return { ok: true };
   } catch (e) {
     console.warn(`[注入] 粘贴失败：${e?.message ?? e}`);
     return { ok: false, reason: 'send-failed' };
   }
+}
+
+/**
+ * 把剪贴板内容粘贴到 target。**调用方必须先写好剪贴板**（渲染进程经 vp:copy）。
+ *
+ * 成功判据 = 「目标窗口确实到了前台」。这不是「粘贴被消费了」的判据 ——
+ * 后者原理上不可检（发键 API 只报告事件入队，不报告目标应用是否处理）。
+ * 管理员权限窗口（Windows UIPI）会因此静默失败，这是 spec §0 已接受的代价。
+ */
+export function pasteTo(target) {
+  return pasteWith(impl, target);
 }
