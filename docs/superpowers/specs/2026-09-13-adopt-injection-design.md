@@ -41,7 +41,7 @@
 | `inject/mac.js` | koffi → `libobjc` / AppKit / CoreGraphics / ApplicationServices | `koffi` |
 | `electron/selftest/inject.js` | 纯函数自测（reason 归类、Target 生命周期、分派），与其余自测同目录 | 无 |
 
-对外接口只有两个：
+对外接口只有两个（业务只跟这两个打交道）：
 
 ```ts
 type Target =
@@ -60,6 +60,10 @@ export function pasteTo(target: Target | null): Promise<PasteResult>;
 ```
 
 **`index.js` 静态 import 两个平台实现，靠 `process.platform` 分派**，不做惰性 `import()` —— 惰性 `import()` 是异步的，而 `captureTarget()` 必须同步，两者打架。之所以可以静态 import：koffi 在 Windows 与 macOS 上都能正常加载，两个平台实现同时在内存里没有副作用。
+
+> 除上面两个对外接口外，`index.js` 还导出 `classifyForeground` 与 `pasteWith`。它们不是对外 API，而是**刻意的测试接缝**：`classifyForeground` 是把失败映射成 `reason` 的纯函数，`pasteWith(platform, target)` 让自测能用假平台把「确认到前台 → 才发键」这条顺序约束钉死（真机验一次不能防回归）。接缝是**承重**的 —— 删掉它就丢掉顺序断言的唯一抓手 —— 不是随手多导出的。业务侧仍然只调 `captureTarget` / `pasteTo`。
+
+> **已接受的启动期风险**：因为 `machine.js` 静态 import `inject/index.js`，而 koffi 在 import 时解析其 `.node`，所以打包版若加载 koffi 失败（macOS arm64 未签名 `.node` 无法 `dlopen`、asarUnpack 未生效等）**是应用启动即致命**，不是「采纳退化」。这条把 §5 的打包验证从「功能验收」升级为「启动门槛」：`dlopen` 不成立就没有降级路径可走。
 
 **硬性约束：平台模块可以在顶层 `import koffi`，但绝不能在顶层调用 `koffi.load()`。** 在 macOS 上 `koffi.load('user32.dll')` 会抛异常，而 `index.js` 静态 import 了 `win.js`，顶层 `load` 就等于让应用在启动时炸。动态库句柄一律**在函数内首次调用时惰性初始化**。
 
@@ -119,8 +123,8 @@ adopt():
 | 步骤 | 调用 |
 |---|---|
 | 捕获 | `objc_msgSend(objc_getClass('NSWorkspace'), sel_registerName('sharedWorkspace'))` → `frontmostApplication` → `processIdentifier`；顺带取 `bundleIdentifier`（可能为 nil） |
-| 权限前置 | `AXIsProcessTrustedWithOptions`（ApplicationServices）；未授权 → `permission`，不尝试注入 |
-| 失效校验 | `runningApplicationWithProcessIdentifier:` 返回 nil，或 `isTerminated` 为真 → `stale` |
+| 权限前置 | `AXIsProcessTrusted`（ApplicationServices）；未授权 → `permission`，不尝试注入 |
+| 失效校验 | `runningApplicationWithProcessIdentifier:` 返回 nil → `stale`。**只判 nil**：加 `isTerminated` 分支是**推迟的候选**（应用进程仍在、仅窗口被关时 `isTerminated` 未必为真），当前实现不含，见 `app/electron/inject/mac.js:164` |
 | 置前 | `activateWithOptions:`（带 `NSApplicationActivateAllWindows`，让目标应用的所有窗口一起上来） |
 | 确认 | 回读 `frontmostApplication` 的 pid，不等于目标 → `activate-failed` |
 | 间隔 | 等约 120ms（比 Windows 长：macOS 应用激活与窗口提升是异步的） |
@@ -128,7 +132,7 @@ adopt():
 
 **加载的动态库**：`/usr/lib/libobjc.A.dylib`、`/System/Library/Frameworks/AppKit.framework/AppKit`、`/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics`、`/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices`。
 
-**权限只要一项**：辅助功能。`CGEventPost` 与 `AXIsProcessTrustedWithOptions` 同属这一项，正好接上现有 `vp:permission/status`（`app/electron/ipc.js:386`）与 F12 的引导/深链。**F12 引导不需要扩**。
+**权限只要一项**：辅助功能。`CGEventPost` 与 `AXIsProcessTrusted` 同属这一项，正好接上现有 `vp:permission/status`（`app/electron/ipc.js:386`）与 F12 的引导/深链。**F12 引导不需要扩**。
 
 **已知最脆的一段**：经 `objc_msgSend` 调 ObjC 方法需要 koffi 正确声明 `libobjc` 的 C 函数与返回类型，写错了不会报错、只会拿到野指针。这是本设计里最需要真机迭代的部分。
 

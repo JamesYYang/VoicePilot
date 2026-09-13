@@ -15,7 +15,7 @@
 | `koffi@3.2.1` 预编译安装（无编译器步骤） | **已实测（Windows 开发机）** | `koffi.load('user32.dll')` 成功，`GetForegroundWindow()` 返回真实 HWND |
 | `uintptr_t` / `uint64_t` / `intptr_t` 返回值类型 | **已实测（Windows 开发机）** | 返回 **`number`**；`void*` 返回 `bigint`。HWND 直接用 `!==` 比较 |
 | asarUnpack 新 glob 让 `.node` 移出 asar | **已实测（Windows 开发机，A/B）** | `electron-builder --win --dir` + `-c.asar.smartUnpack=false`：旧 glob `node_modules/koffi/**` 不命中（koffi 3.x 的原生二进制在 `@koromix/koffi-<plat>-<arch>/`），`.node` 留在 asar 内；新 glob `@koromix/**` 命中，asar 缩小约 1.04 MB，产物落在 `app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node`（1,036,800 B） |
-| 自测（主进程注入 17/17、状态机 39/39、界面 88/88、i18n 三语键齐、typecheck 干净） | **已实测（Windows 开发机）** | 只覆盖纯函数 / 编排顺序 / 界面分支，**不含真实置前与粘贴** |
+| 自测（主进程注入 17/17、状态机 41/41、界面 88/88、i18n 三语键齐、typecheck 干净） | **已实测（Windows 开发机）** | 只覆盖纯函数 / 编排顺序 / 界面分支，**不含真实置前与粘贴** |
 | **真实置前 + 粘贴（记事本 / 浏览器 / 终端 / Office）** | **未验（Win 与 Mac 都没有）** | 本手册的核心内容 |
 | **整个 macOS 实现**（5 个 `objc_msgSend` 声明、`AXIsProcessTrusted` 符号解析、`frontPid()`、自守、`activateWithOptions:`、`CGEventPost`） | **未验（需 Mac 真机）** | macOS 上从未执行过 |
 | **打包版能否 `dlopen` 外置的 `.node`**（Win / Mac arm64） | **未验** | 上面的 A/B 只证明文件**移动了**，没证明应用能**加载它** |

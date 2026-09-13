@@ -702,9 +702,9 @@ function lib() {
   // 天文数字的 options。传 number 即可（Task 1 实测 uintptr_t 与 number 互通）。
   //
   // 返回类型是 **BOOL**（方法签名 `- (BOOL)activateWithOptions:`），不是 void。
-  // 但**不要使用这个返回值**：macOS 14 起该位（IgnoringOtherApps）已被弃用，实测常见
-  // 「返回 YES 却没真的置前」。本设计的成功判据是**回读前台窗口**那一条（spec §3），
-  // 多一个会骗人的判据只会引入误报。声明成 bool 只是为了让声明与 API 一致。
+  // 但**不要使用这个返回值**：macOS 14 起该位（IgnoringOtherApps）已被弃用，公开资料
+  // 常见「返回 YES 却没真的置前」（本机未验）。本设计的成功判据是**回读前台窗口**
+  // 那一条（spec §3），多一个会骗人的判据只会引入误报。声明成 bool 只是为了让声明与 API 一致。
   const msgSendBoolUPtr = objc.func('bool objc_msgSend(void* receiver, void* selector, uintptr_t arg)');
 
   // 只为确保 AppKit 已在本进程里加载，否则 objc_getClass('NSWorkspace') 会拿到 null。
@@ -871,7 +871,7 @@ Task 3 写的 `index.js` 的 `pasteTo` 是：`impl.activate(target)` → `classi
 > - `objc_msgSend` 的五个声明是否都对（每个声明对应哪个方法、返回宽度是否匹配）；
 > - `AXIsProcessTrusted` **能否从 ApplicationServices 伞形框架里解析到符号**（该符号实际在 HIServices，靠伞形框架再导出；若解析不到，`lib()` 会在首次使用时抛）；
 > - `frontPid()` 是否真的返回前台应用 pid；`pid === process.pid` 这条自查护栏所依赖的「`frontmostApplication` 返回主进程 pid」这一 Electron 进程模型假设是否成立；
-> - `activateWithOptions:` 是否真能把目标应用拉到前台（`IgnoringOtherApps` 位自 macOS 14 起已弃用，实测常见「调用成功但没到前台」）；
+> - `activateWithOptions:` 是否真能把目标应用拉到前台（`IgnoringOtherApps` 位自 macOS 14 起已弃用，公开资料常见「调用成功但没到前台」，本机未验）；
 > - `CGEventPost` 在授予辅助功能权限后是否真的粘上。
 
 - [ ] **Step 4: 运行**
@@ -1006,6 +1006,20 @@ async function testCaptureTarget() {
   // 放行被取消的会话，让 start() 的 promise 收尾，别留下悬挂的 pending。
   session.releaseStart();
   await pending;
+
+  // reviewing → dismiss 是另一条到 idle 的路径，也必须清空目标。
+  // 不 hold 会话：start() 直接走到 listening，再 toggle 一次即 stop → draining → reviewing。
+  const m2 = new SessionMachine({
+    emit() {},
+    createSession: () => new FakeSession({}),
+    credentials: {},
+    captureTarget: () => ({ kind: 'win', hwnd: 11 }),
+  });
+  await m2.start();
+  await m2.toggle(); // listening → draining → reviewing
+  check('reviewing 期目标仍持有（采纳就是在这时用它）', m2.getTarget() !== null, JSON.stringify(m2.getTarget()));
+  await m2.toggle(); // reviewing → dismiss
+  check('dismiss 后清空目标', m2.getTarget() === null, JSON.stringify(m2.getTarget()));
 }
 ```
 
@@ -1017,7 +1031,7 @@ async function testCaptureTarget() {
 
 > **为什么这里不验「捕获实现抛异常时状态机兜得住」**：兜底责任在 `inject/index.js` 的 `captureTarget`（它自己 try/catch 并返回 null），不在状态机 —— 状态机只认「一个返回 `Target|null` 的函数」这个契约，不该替实现擦屁股。给状态机加 try/catch 会把真实现里的 bug 一起吞掉。那条契约由 `VP_INJECT_SELFTEST` 的 `captureTarget() 不抛` 覆盖（Task 2）。
 
-> **本 Task 的基线不是 29 而是 34。** 计划早期写的「29 + 5 = 34」已过时（2A 的 `testBarFocusable` 等新增用例把它推到了 34）。实测：改动前 **34** 项、改动后 **39** 项。**报实际观测值，不要为了让数字对上而改断言。**
+> **本 Task 的基线不是 29 而是 34。** 计划早期写的「29 + 5 = 34」已过时（2A 的 `testBarFocusable` 等新增用例把它推到了 34）。实测：改动前 **34** 项、改动后 **39** 项；后续补 `#dismiss()` 的 reviewing → idle 清空断言再 **+2**，定为 **41**。**报实际观测值，不要为了让数字对上而改断言 —— 观测值才是权威。**
 
 - [ ] **Step 3: 加 IPC 通道**
 
@@ -1078,7 +1092,7 @@ Run: `cd app && npm run typecheck`
 Expected: 干净通过
 
 Run: `cd app && VP_SM_SELFTEST=1 npx electron .`
-Expected: 通过。**此时总数应为 34 + 5 = 39**（改前实测 34 项 + `testCaptureTarget` 的 5 项；计划早期写的 29 是过时基线）；若不是 39，说明自测没接进 `runMachineSelftest`。Run: `cd app && VP_INJECT_SELFTEST=1 npx electron .`
+Expected: 通过。**此时总数应为 34 + 5 = 39**（改前实测 34 项 + `testCaptureTarget` 的 5 项；计划早期写的 29 是过时基线）；若数字不是观测到的那个，说明自测没接进 `runMachineSelftest`。（后续补 `#dismiss()` 清空断言后总数为 **41**，见下方 Step 2 末尾的追加块。）Run: `cd app && VP_INJECT_SELFTEST=1 npx electron .`
 Expected: 通过
 
 > ⚠️ **本条无法自动验**：`vp:adopt/paste` 真的把前台切过去并粘上。IPC 通道本身在界面自测里（Task 7）只验「有没有被调用、参数对不对」。
@@ -1153,8 +1167,11 @@ git commit -m "feat(adopt): 状态机捕获目标窗口 + 采纳写回 IPC 与�
   // 这个假 bridge 要赋给 `VoicePilotBridge`，而真桥的 adoptPaste() 返回的是**字面量联合**，
   // 手写的 `reason: string` 会因逆变检查不过而报 TS2322（bridge 与 noPresetBridge 两处都会报）。
   // 派生出来就是单一真源：主进程改了 reason 取值，这里跟着变。
-  type AdoptPasteResult = Awaited<ReturnType<Window['voicepilot']['adoptPaste']>>;
-  const adoptPasteCtl: { result: AdoptPasteResult; calls: number } = {
+  // 不另起 `type AdoptPasteResult` 别名，直接把派生类型内联在 holder 上（实现即如此）。
+  const adoptPasteCtl: {
+    result: Awaited<ReturnType<Window['voicepilot']['adoptPaste']>>;
+    calls: number;
+  } = {
     result: { ok: true },
     calls: 0,
   };
@@ -1275,7 +1292,7 @@ Run: `cd app && npm run build && VP_UI_SELFTEST=1 npx electron .`
 Expected: **Step 2 里红的那条现在绿了**，全部通过、退出码 0。若仍红，说明实现与断言对不上 —— 先查 `adopt` 有没有真的在 `r.ok` 分支调 `vp.toggle()`。
 
 Run: `cd app && VP_SM_SELFTEST=1 npx electron .`
-Expected: 39/39 通过（Task 5 之后的总数）
+Expected: 41/41 通过（Task 5 之后 39，补 `#dismiss()` 清空断言后 41）
 
 - [ ] **Step 6: Commit**
 

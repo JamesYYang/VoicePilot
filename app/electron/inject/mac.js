@@ -36,9 +36,9 @@ function lib() {
   // 天文数字的 options。传 number 即可（Task 1 实测 uintptr_t 与 number 互通）。
   //
   // 返回类型是 **BOOL**（方法签名 `- (BOOL)activateWithOptions:`），不是 void。
-  // 但**不要使用这个返回值**：macOS 14 起该位（IgnoringOtherApps）已被弃用，实测常见
-  // 「返回 YES 却没真的置前」。本设计的成功判据是**回读前台窗口**那一条（spec §3），
-  // 多一个会骗人的判据只会引入误报。声明成 bool 只是为了让声明与 API 一致。
+  // 但**不要使用这个返回值**：macOS 14 起该位（IgnoringOtherApps）已被弃用，公开资料
+  // 常见「返回 YES 却没真的置前」（本机未验）。本设计的成功判据是**回读前台窗口**
+  // 那一条（spec §3），多一个会骗人的判据只会引入误报。声明成 bool 只是为了让声明与 API 一致。
   const msgSendBoolUPtr = objc.func('bool objc_msgSend(void* receiver, void* selector, uintptr_t arg)');
 
   // 只为确保 AppKit 已在本进程里加载，否则 objc_getClass('NSWorkspace') 会拿到 null。

@@ -18,20 +18,24 @@ export async function runInjectSelftest() {
   check('koffi 已加载且暴露 load()', typeof koffi?.load === 'function');
 
   if (process.platform === 'win32') {
-    // 这一步同时在验「打包后 .node 能被 dlopen」（spec §8 第 1/2/3 条）。
+    // 这里验的是「开发态能加载并调用 real user32」。
+    // **不能**声称验了「打包后 .node 能被 dlopen」—— 那条只在打包版成立，见 Task 8 的 runbook。
     const user32 = koffi.load('user32.dll');
     const GetForegroundWindow = user32.func('uintptr_t GetForegroundWindow()');
     const hwnd = GetForegroundWindow();
     // 无人值守进程里可能没有前台窗口（返回 0），所以不断言具体值，只断言**类型对**。
     // 这里的核心契约是「返回可比数值，而不是每次新建的指针对象」——只有前者能用 !== 判等。
     //
-    // 实测偏差（koffi 3.2.1 / Electron 44 / win32-x64）：uintptr_t 解出来是 **number**，
-    // 不是 brief 预期的 bigint。同口径实测：uintptr_t / uint64_t / intptr_t → number，
-    // void* → bigint，koffi.address(x) 一律归一成 bigint。故按实测放宽到 number|bigint，
-    // 而不是改口说它是 bigint（结论已回写报告，供 Task 3/4 使用）。
+    // 实测（koffi 3.2.1 / Electron 44 / win32-x64）：uintptr_t 解出来是 **number**，
+    // 同口径实测：uintptr_t / uint64_t / intptr_t → number，void* → bigint，
+    // koffi.address(x) 一律归一成 bigint。
+    //
+    // 断言**只接受 number**，不放宽到 number|bigint：HWND 若被误声明成 void* 会返回
+    // bigint，宽松断言就分不出「uintptr_t 声明」与「void* 声明」—— 而这正是本断言要抓的
+    // 回归（void* 返回的是指针值，不能用 !== 判数值相等）。
     check(
-      'GetForegroundWindow() 返回可比数值（uintptr_t → number，非指针对象）',
-      typeof hwnd === 'number' || typeof hwnd === 'bigint',
+      'GetForegroundWindow() 返回可比较的数值（number）',
+      typeof hwnd === 'number',
       `${typeof hwnd} ${hwnd}`
     );
   } else if (process.platform === 'darwin') {

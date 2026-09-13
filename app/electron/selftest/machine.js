@@ -305,6 +305,20 @@ async function testCaptureTarget() {
   // 放行被取消的会话，让 start() 的 promise 收尾，别留下悬挂的 pending
   session.releaseStart();
   await pending;
+
+  // reviewing → dismiss 是另一条到 idle 的路径，也必须清空目标。
+  // 不 hold 会话：start() 直接走到 listening，再 toggle 一次即 stop → draining → reviewing。
+  const m2 = new SessionMachine({
+    emit() {},
+    createSession: () => new FakeSession({}),
+    credentials: {},
+    captureTarget: () => ({ kind: 'win', hwnd: 11 }),
+  });
+  await m2.start();
+  await m2.toggle(); // listening → draining → reviewing
+  check('reviewing 期目标仍持有（采纳就是在这时用它）', m2.getTarget() !== null, JSON.stringify(m2.getTarget()));
+  await m2.toggle(); // reviewing → dismiss
+  check('dismiss 后清空目标', m2.getTarget() === null, JSON.stringify(m2.getTarget()));
 }
 
 export async function runMachineSelftest() {
