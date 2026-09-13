@@ -7,7 +7,7 @@ import { join } from 'node:path';
  *
  * 用 Node 内建的 node:sqlite（DatabaseSync 同步 API）而不是 better-sqlite3：
  * Electron 44 内置 Node 24.20.0，node:sqlite 与 FTS5 trigram 均可用（已实测），
- * 省掉原生模块与 electron-rebuild 一整套。三张表：history / presets / meta。
+ * 省掉原生模块与 electron-rebuild 一整套。四张表：history / presets / phrases / meta。
  */
 
 const BUILTIN_SCENES = [
@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS presets (
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS phrases (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  title      TEXT NOT NULL,
+  text       TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  used_at    INTEGER
 );
 `;
 
@@ -222,6 +230,53 @@ export function deletePreset(id) {
   if (!row || row.is_builtin) return false; // 内置预设不可删
   db.prepare('DELETE FROM presets WHERE id = ?').run(id);
   return true;
+}
+
+// ---------------------------------------------------------------- 常用语
+
+/**
+ * 列表按「最近使用优先」排：用过就用 used_at，没用过退回 created_at。
+ * id DESC 是决胜位，保证同一毫秒内插入的多条顺序稳定。
+ */
+export function listPhrases({ limit = 200, offset = 0 } = {}) {
+  openStore();
+  return db
+    .prepare(
+      `SELECT id, title, text, created_at, updated_at, used_at FROM phrases
+       ORDER BY COALESCE(used_at, created_at) DESC, id DESC LIMIT ? OFFSET ?`
+    )
+    .all(limit, offset);
+}
+
+export function savePhrase({ title, text }) {
+  openStore();
+  const now = Date.now();
+  const r = db
+    .prepare('INSERT INTO phrases (title, text, created_at, updated_at, used_at) VALUES (?,?,?,?,NULL)')
+    .run(title, text, now, now);
+  return { id: Number(r.lastInsertRowid) };
+}
+
+/** 改标题/正文。返回是否命中一行（id 不存在时诚实返回 false）。 */
+export function updatePhrase(id, { title, text }) {
+  openStore();
+  const r = db
+    .prepare('UPDATE phrases SET title = ?, text = ?, updated_at = ? WHERE id = ?')
+    .run(title, text, Date.now(), id);
+  return r.changes > 0;
+}
+
+export function deletePhrase(id) {
+  openStore();
+  const r = db.prepare('DELETE FROM phrases WHERE id = ?').run(id);
+  return r.changes > 0;
+}
+
+/** 记一次「被选中」（只动 used_at，不动 updated_at —— 它不是编辑）。 */
+export function touchPhrase(id) {
+  openStore();
+  const r = db.prepare('UPDATE phrases SET used_at = ? WHERE id = ?').run(Date.now(), id);
+  return r.changes > 0;
 }
 
 // ---------------------------------------------------------------- 元数据

@@ -4,7 +4,10 @@ import {
   updateHistoryText,
   deleteHistory, listPresets, savePreset, deletePreset, getMeta, setMeta, migrateDefaultScene,
   getShortcut, setShortcut, resolvePolishTarget,
+  savePhrase, listPhrases, updatePhrase, deletePhrase, touchPhrase,
 } from '../store.js';
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function runStoreSelftest() {
   console.log('[自测] 本地存储（store）');
@@ -104,6 +107,15 @@ export async function runStoreSelftest() {
   const okMigrateBackfillIdem =
     again?.name_zh_cn === '文档' && again?.name_zh_tw === '文檔' && again?.name_en === 'Document';
 
+  // ---- 常用语表在旧库上被自动建出 ----
+  // 上面那个 oldDb 是用旧 schema 手建的（只有 presets，没有 phrases），经
+  // openStoreWithDb 走完整管线后必须长出 phrases 表。本项目在 presets 三语列上
+  // 踩过迁移的坑，所以这条不能只靠推理。
+  const phTable = oldDb
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='phrases'")
+    .get();
+  const okPhraseTableCreated = phTable?.name === 'phrases';
+
   // 快捷键读写：未设置返回 null；设置后可读回；覆盖写生效
   const okShortcutDefault = getShortcut() === null;
   setShortcut('CommandOrControl+Alt+Space');
@@ -131,12 +143,42 @@ export async function runStoreSelftest() {
   const okTargetExplicitId = resolvePolishTarget(7, 42) === 7;
   const okTargetNoPending = resolvePolishTarget(undefined, null) === null;
 
+  // ---- 常用语：CRUD ----
+  const { id: ph1 } = savePhrase({ title: '问候', text: '您好，收到您的反馈，我先看一下。' });
+  const { id: ph2 } = savePhrase({ title: '收尾', text: '有问题随时找我。' });
+  const okPhSave = listPhrases({}).length === 2;
+
+  const okPhUpdate = updatePhrase(ph1, { title: '问候（改）', text: '改过的正文' }) === true;
+  const okPhUpdateMiss = updatePhrase(999999, { title: 'x', text: 'y' }) === false;
+  const phEdited = listPhrases({}).find((p) => p.id === ph1);
+  const okPhUpdateFields =
+    phEdited?.title === '问候（改）' && phEdited?.text === '改过的正文' &&
+    phEdited?.updated_at >= phEdited?.created_at;
+
+  const okPhDelMiss = deletePhrase(999999) === false;
+
+  // ---- 常用语：used_at 驱动排序 ----
+  // 没用过时按 created_at 倒序：后插入的 ph2 在前。
+  const okPhOrderByCreated = listPhrases({})[0].id === ph2;
+
+  // touch 一条更早创建的，它必须跳到最前 —— 这是「最近使用优先」的唯一证据。
+  await sleep(2); // 避免 used_at 与 created_at 落在同一毫秒（sqlite 存整数毫秒）
+  const okPhTouch = touchPhrase(ph1) === true;
+  const okPhTouchMiss = touchPhrase(999999) === false;
+  const okPhOrderByUsed = listPhrases({})[0].id === ph1;
+
+  const okPhDelete = deletePhrase(ph1) === true;
+  const okPhDeleteGone = listPhrases({}).length === 1 && listPhrases({})[0].id === ph2;
+
   const ok = okSeed && okWrite && okUpdate && okDelHistory && okDelGone && okDelMissing && okAdd && okEdit && okBuiltinKeep && okDel && okMeta && okTrilingual &&
     okMigrateMiss && okMigrateHit && okMigrateIdem &&
     okMigrateBackfill && okMigrateList && okMigrateBackfillIdem &&
     okShortcutDefault && okShortcutSet && okShortcutOverwrite &&
     okUpdateText &&
-    okTargetExplicitNull && okTargetFallback && okTargetExplicitId && okTargetNoPending;
-  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem} 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite} 更新正文=${okUpdateText} 采纳目标行=${okTargetExplicitNull && okTargetFallback && okTargetExplicitId && okTargetNoPending}`);
+    okTargetExplicitNull && okTargetFallback && okTargetExplicitId && okTargetNoPending &&
+    okPhSave && okPhUpdate && okPhUpdateMiss && okPhUpdateFields &&
+    okPhDelMiss && okPhOrderByCreated && okPhTouch && okPhTouchMiss && okPhOrderByUsed &&
+    okPhDelete && okPhDeleteGone && okPhraseTableCreated;
+  console.log(`[自测] ${ok ? '通过' : '失败'} 播种=${okSeed} 写=${okWrite} 更新=${okUpdate} 删历史=${okDelHistory && okDelGone && okDelMissing} 增=${okAdd} 改=${okEdit} 内置不删=${okBuiltinKeep} 删=${okDel} meta=${okMeta} 三语=${okTrilingual} 迁移未命中=${okMigrateMiss} 迁移命中=${okMigrateHit} 迁移幂等=${okMigrateIdem} 回填=${okMigrateBackfill} 回填列表=${okMigrateList} 回填幂等=${okMigrateBackfillIdem} 快捷键=${okShortcutDefault && okShortcutSet && okShortcutOverwrite} 更新正文=${okUpdateText} 采纳目标行=${okTargetExplicitNull && okTargetFallback && okTargetExplicitId && okTargetNoPending} 常用语=${okPhSave && okPhUpdate && okPhUpdateMiss && okPhUpdateFields && okPhDelMiss && okPhOrderByCreated && okPhTouch && okPhTouchMiss && okPhOrderByUsed && okPhDelete && okPhDeleteGone} 常用语建表=${okPhraseTableCreated}`);
   return { ok };
 }
