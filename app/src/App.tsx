@@ -158,11 +158,6 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
 
   const captureRef = useRef<{ start: () => Promise<void>; stop: () => Promise<void> } | null>(null);
   const errorTimerRef = useRef<number | null>(null);
-  // 上一次已请求的窗口高度（去重用）。声明在这里而不是紧挨高度 effect，
-  // 是因为 warming 的复位块也要把它清零：主进程在 idle/warming 已把窗口收回
-  // 基础高度，渲染侧若还记着上一段的高值，高度 effect 会因「没变化」短路，
-  // 再也请求不回一个合身的高度。
-  const lastHeightRef = useRef(0);
 
   /** 出错时展示并停留几秒。悬浮条可能随即回到 idle，不能跟着立刻消失。 */
   const showError = useCallback((e: { kind: string; message: string }) => {
@@ -299,9 +294,8 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       historySavedRef.current = false;
       historyIdRef.current = null;
       historySaveRef.current = null;
-      // 主进程此刻正把窗口收回基础高度（resetBarHeight），清掉去重值，
-      // 让高度 effect 能在本段内容需要时重新请求一个合身的高度。
-      lastHeightRef.current = 0;
+      // 窗口高度不用在这里复位：主进程此刻正把窗口收回基础高度（resetBarHeight），
+      // 高度 effect 下一轮直接用 window.innerHeight 实测得到，不需要渲染侧记账。
 
       // 「快捷键 → 上屏」的终点是**真的画出来**的那一刻，所以等一帧再回报。
       // performance.timeOrigin + performance.now() 是 epoch 毫秒，
@@ -434,7 +428,7 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [draft, committed, snap.state]);
 
-  // 进 phrases 态：拉一次列表、复位检索、把焦点给搜索框。
+  // 进 phrases 态：拉一次列表、复位检索、清掉上一段结果的一次性提示、把焦点给搜索框。
   // 聚焦依赖主进程那边已经 focus() 过窗口（见 ipc.js 的 emit）—— DOM focus 只决定
   // 键盘落在哪个元素上，窗口本身没被激活的话按键照样不来。
   useEffect(() => {
@@ -443,6 +437,12 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     setPhraseIndex(0);
     void vp.phrasesList().then(setPhrases).catch(() => setPhrases([]));
     searchRef.current?.focus();
+    // 条底的**一次性提示**（「已存为常用语」「已复制到剪贴板」）属于上一段结果：它们
+    // 只在 warming 复位块里清，而 idle 下整个条是不渲染的（组件直接 return null），
+    // state 里的那条提示就一直留着 —— 再打开选择器时它又出现在条底，看起来像刚发生
+    // 的事（用户反馈：保存成功那句跟着进了选择器）。选择器是新的一段交互，从这里起清掉。
+    setHint('');
+    setCopied(false);
     // 进选择器就把上一段听写残留的历史 id 清掉：常用语一路不落历史，若留着旧 id，
     // 「选一条 → 润色 → 采纳」会把润色结果写进上一条无关记录（主进程按显式 id 落库，
     // 不会替我们判断这条 id 属不属于本次）。
@@ -568,8 +568,14 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       BAR_MAX_HEIGHT
     );
     const rounded = Math.round(target);
-    if (rounded === lastHeightRef.current) return;
-    lastHeightRef.current = rounded;
+    // 去重必须拿**窗口当前的真实高度**（window.innerHeight）当基准，不能拿「上次请求过的
+    // 值」：窗口高度归主进程所有，它在 idle/warming 会用 resetBarHeight 把窗口收回基础
+    // 高度，那是渲染侧看不见的变化。拿请求值当基准的话，第二次打开常用语选择器时算出来
+    // 的值与上次相同，这次 resize 会被当成「没变化」吞掉，窗口就停在 148 —— 列表 260px
+    // 只有一行可见（真机复现：请求 368 被吞，rootClient=131 而 rootScroll=350）。
+    // 留在 148 的窗口是主进程单方面改的，渲染侧只有实测才看得见。
+    // 2px 容差：非 100% 缩放下窗口高与请求值可能差 1px（系统把矩形对到物理像素上）。
+    if (Math.abs(window.innerHeight - rounded) <= 2) return;
     vp.resizeBar(rounded);
   }, [
     draft, committed, snap, error, copied, hint, edited,

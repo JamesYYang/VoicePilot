@@ -147,13 +147,14 @@ function attachDevLogging(win) {
 }
 
 function createBar() {
-  const { x, y, width, height } = screen.getPrimaryDisplay().workArea;
+  // 初始位置与后续 resize/复位共用同一个来源（barBounds），否则两边迟早算不到一处去。
+  const init = barBounds(BAR.height);
 
   bar = new BrowserWindow({
     width: BAR.width,
     height: BAR.height,
-    x: x + width - BAR.width - BAR.margin,
-    y: y + height - BAR.height - BAR.margin,
+    x: init.x,
+    y: init.y,
     // 悬浮条必须自带图标：Windows 上没设 icon 的窗口回退到宿主 exe 的图标，
     // 开发模式下就是 electron.exe 的 Electron 标志。其余窗口都设了同一个 icon。
     icon: join(HERE, '..', 'build', 'voicepilot-icon-256.png'),
@@ -214,10 +215,41 @@ function createBar() {
 }
 
 /**
+ * 悬浮条该在的矩形：贴着**当前**工作区的右下角，留一个 margin。
+ *
+ * 位置每次都从工作区重新推，**绝不从「上一次的 bounds」推**（旧实现是
+ * `bottom = b.y + b.height`）。后者会累积漂移：缩放不是 100% 时系统会把窗口矩形
+ * 对齐到物理像素上，回读值比请求值大 1px（1.5 倍实测：请求 153 → 回读 154），于是
+ * 每次缩放/复位都把底边往下推 1px。真机实测 40 次 resize 后底边从 1208 漂到 1247，
+ * 而任务栏从 1232 开始 —— 表现就是「悬浮条有时候被任务栏挡住」（用户反馈）。
+ * 从工作区重推还有个副作用是好的：任务栏/分辨率变了，下一次动作就自动纠偏。
+ */
+function barBounds(height) {
+  const { x, y, width, height: workH } = screen.getPrimaryDisplay().workArea;
+  return {
+    x: x + width - BAR.width - BAR.margin,
+    y: y + workH - height - BAR.margin,
+    width: BAR.width,
+    height,
+  };
+}
+
+/** 把窗口摆到目标高度，位置一并拉回工作区右下角。已经是那个矩形就什么都不做。 */
+function placeBar(height) {
+  if (!bar || bar.isDestroyed()) return;
+
+  const next = barBounds(height);
+  const b = bar.getBounds();
+  if (b.x === next.x && b.y === next.y && b.width === next.width && b.height === next.height) return;
+
+  bar.setBounds(next);
+}
+
+/**
  * 按渲染进程报上来的内容高度调整悬浮条窗口高度。
  *
- * 只在 [BAR.height, BAR_MAX_HEIGHT] 区间内变，且不超出工作区；保持底边不动
- * （向上生长），这样悬浮条始终贴着桌面右下角，不会越说越往上漂。
+ * 只在 [BAR.height, BAR_MAX_HEIGHT] 区间内变，且不超出工作区；位置交给 placeBar，
+ * 始终贴着桌面右下角（向上生长），不会越说越往上漂、也不会往任务栏里沉。
  */
 function resizeBar(height) {
   if (!bar || bar.isDestroyed()) return;
@@ -226,15 +258,11 @@ function resizeBar(height) {
   const max = Math.min(BAR_MAX_HEIGHT, workH - BAR.margin * 2);
   const clamped = Math.min(Math.max(Math.round(height), BAR.height), max);
 
-  const b = bar.getBounds();
-  if (Math.abs(b.height - clamped) < 1) return; // 没变化就跳过，避免高频抖动
-
-  const bottom = b.y + b.height; // 底边固定
-  bar.setBounds({ x: b.x, y: bottom - clamped, width: b.width, height: clamped });
+  placeBar(clamped);
 }
 
 /**
- * 把悬浮条窗口收回基础高度（BAR.height），保持 x 与底边不动。
+ * 把悬浮条窗口收回基础高度（BAR.height），位置照旧贴工作区右下角。
  *
  * resizeBar 只会「按渲染进程报上来的值变」，没有任何路径把它调小 —— 一段长口述
  * 把窗口顶到 620 后，会话结束、关闭、再触发，窗口仍停在 620（空文本配大窗），
@@ -244,13 +272,7 @@ function resizeBar(height) {
  * ipc.js 的 emit）；listening/draining 会长文本、reviewing 要放编辑区，都不复位。
  */
 function resetBarHeight() {
-  if (!bar || bar.isDestroyed()) return;
-
-  const b = bar.getBounds();
-  if (Math.abs(b.height - BAR.height) < 1) return; // 已在基础高度，跳过
-
-  const bottom = b.y + b.height; // 与 resizeBar 同款「底边固定」算法
-  bar.setBounds({ x: b.x, y: bottom - BAR.height, width: b.width, height: BAR.height });
+  placeBar(BAR.height);
 }
 
 /**
@@ -483,6 +505,28 @@ app.whenReady().then(async () => {
   // 界面自测需要一个隐藏窗口来渲染，结果由 vp:uitest-result 回报（见 ipc.js）
   if (process.env.VP_UI_SELFTEST) {
     createUiTestWindow();
+    return;
+  }
+
+  // 悬浮条几何自测量的是真窗口在真屏幕上的坐标，所以**必须先建悬浮条**
+  // （其余自测都是「不建窗口」，这条不是）。需要真实显示器，不进无人值守那组。
+  if (process.env.VP_BAR_SELFTEST) {
+    createBar();
+    try {
+      const mod = await import('./selftest/bar.js');
+      const r = await mod.runBarSelftest({
+        getBar: () => bar,
+        resizeBar,
+        resetBarHeight,
+        machine,
+        screen,
+        BAR,
+      });
+      requestQuit(r.ok ? 0 : 1);
+    } catch (e) {
+      console.error(`[自测] 异常终止：${e?.stack ?? e}`);
+      requestQuit(1);
+    }
     return;
   }
 

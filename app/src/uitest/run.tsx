@@ -1262,6 +1262,23 @@ export async function runUiTest() {
   check('有润色时存的是润色文本（不是编辑区原文）',
     savedPolished?.text === '润色后的常用语正文', JSON.stringify(savedPolished));
 
+  // ---- 26b. 上一段结果的一次性提示不得跟进选择器（真机反馈）----
+  // 「已存为常用语」原本留在条底：idle 下整条不渲染（组件直接 return null），这条提示
+  // 只在 warming 复位块里清，于是再打开选择器时它又出现在搜索框下面，像是刚刚发生的事。
+  // 判据必须同时看「进之前挂着」与「进之后没了」—— 只看后者的话，提示若压根没被设置
+  // （保存路径断了）也一样绿，等于没测。
+  phraseRows = [
+    { id: 1, title: '问候', text: '您好，收到您的反馈，我先看一下。', created_at: 2, updated_at: 2, used_at: null },
+  ];
+  const hintNode = () =>
+    container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent ?? null;
+  await flush(); // setHint 落在 phrasesSave 之后一轮调度里（见上面那条 waitFor 的注释）
+  check('（前提）保存常用语后条底挂着「已存为常用语」',
+    hintNode() === '已存为常用语', JSON.stringify(hintNode()));
+  await enterPhrases();
+  check('进选择器后不再显示上一段的一次性提示',
+    hintNode() === null, JSON.stringify(hintNode()));
+
   // derivePhraseTitle 的边界（纯函数，直接验）
   check('derivePhraseTitle：空串 → 空', derivePhraseTitle('') === '', JSON.stringify(derivePhraseTitle('')));
   check('derivePhraseTitle：全空白 → 空',

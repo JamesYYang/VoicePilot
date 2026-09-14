@@ -95,9 +95,10 @@ npm start          # vite build && electron .
 ```bash
 cd app
 npx tsc --noEmit                          # 全量类型检查
-VP_UI_SELFTEST=1 npx electron .           # 界面自测（隐藏窗口 + 假 bridge）
+VP_UI_SELFTEST=1 npx electron .           # 界面自测（隐藏窗口 + 假 bridge，跑前先 npm run build）
 VP_STORE_SELFTEST=1 npx electron .        # 存储自测
 VP_SM_SELFTEST=1 npx electron .           # 状态机自测
+VP_BAR_SELFTEST=1 npx electron .          # 悬浮条几何（真窗口：贴边不漂移 / 每次打开选择器都长到合身高度；需要显示器）
 ```
 
 ---
