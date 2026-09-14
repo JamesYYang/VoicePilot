@@ -13,13 +13,16 @@
 
 ## 〇、上 Mac 之前（必做，否则测的不是这份代码）
 
-**当前 26 个提交只在 Windows 机器上，未 push。** 上 Mac 前先决定怎么带过去（push 到远端 / 手工拷贝），到 Mac 上确认：
+**这批改动已经在远端 `origin/main` 上**（2026-09-14 核对：远端 = 本地 = `e99065e`）。到 Mac 上先同步并核对版本：
 
 ```bash
 cd voicepilot
-git log --oneline -1      # 期望 522f518 或更新；不是的话，你测的是旧代码
+git pull
+git log --oneline -1      # 期望 e99065e 或更新；不是的话，你测的是旧代码
 git status                # 期望干净
 ```
+
+> 若远端还是旧版本，说明本次改动没带过去 —— 让 Windows 侧先 push 再上 Mac。
 
 前置（一次性，见附录 A 的详细说明）：
 
