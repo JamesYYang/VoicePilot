@@ -114,6 +114,36 @@ export async function runBarSelftest({ getBar, resizeBar, resetBarHeight, machin
       JSON.stringify(bounds()));
   }
 
+  // ---- 3. 条不再渲染时必须恢复穿透（真机反馈：Mac 上 Chrome 右下角的按钮点不动）----
+  // 条是常驻置顶窗口，占着屏幕右下角 560×148。鼠标移入时它会临时关掉穿透（条里的按钮
+  // 才点得到），而「移出」是在渲染侧的根节点上收的 —— 条一回到 idle 就不再渲染、元素被
+  // 卸载，那个 mouseleave 永远不会来，穿透就停在「关」上：窗口看不见、却一直吃掉那块
+  // 矩形里的点击。这里量的是**窗口真实收到的那次 setIgnoreMouseEvents**，不是渲染侧意图。
+  const passthrough = []; // 记录 setIgnoreMouseEvents 的实参：true=穿透（点得下去）
+  const origSetIgnore = bar.setIgnoreMouseEvents.bind(bar);
+  bar.setIgnoreMouseEvents = (ignore, opts) => {
+    passthrough.push(Boolean(ignore));
+    return origSetIgnore(ignore, opts);
+  };
+
+  await machine.openPhrases();
+  await sleep(1200);
+  await bar.webContents.executeJavaScript(
+    `(() => {
+       const root = document.querySelector('[data-state]');
+       if (root) root.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+       return true;
+     })()`
+  );
+  await sleep(300);
+  check('鼠标移入条时关掉穿透（条里的按钮才点得到）',
+    passthrough[passthrough.length - 1] === false, JSON.stringify(passthrough));
+
+  await machine.openPhrases(); // 关掉选择器 → 条不再渲染
+  await sleep(800);
+  check('条不再渲染后必须恢复穿透（否则不可见的窗口会吃掉屏幕右下角的点击）',
+    passthrough[passthrough.length - 1] === true, JSON.stringify(passthrough));
+
   return summarize(results);
 }
 

@@ -454,12 +454,19 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
     historySaveRef.current = null;
   }, [snap.state, vp]);
 
-  // 回 idle 清掉选中态，避免下一轮选择器带着上一条的正文。
+  // 回 idle 清掉选中态与悬停态，避免下一轮选择器带着上一条的正文。
+  //
+  // hovering 必须一起清：它唯一的用途是「鼠标在条上时关掉穿透」，而穿透一旦关掉，这张
+  // 常驻置顶窗口就会吃掉它那块矩形（屏幕右下角 560×148）里的点击。而「移出」是根节点的
+  // onMouseLeave 收的 —— 回 idle 时整条被卸载（组件 return null），浏览器不会再补一个
+  // mouseleave，hovering 就永远停在 true：窗口看不见、却一直挡着下面的应用。
+  // 真机表现：Mac 上 Chrome 网页右下角的按钮鼠标移上去不变手型、点不动。
   useEffect(() => {
     if (snap.state !== 'idle') return;
     setPhraseText(null);
     setPhraseQuery('');
     setPhraseIndex(0);
+    setHovering(false);
   }, [snap.state]);
 
   /** 输入即筛选：标题与正文都匹配。空查询返回全部（主进程已按最近使用排好）。 */

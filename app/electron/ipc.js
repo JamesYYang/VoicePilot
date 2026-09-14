@@ -69,6 +69,15 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
       // draining 会长文本、reviewing 要放编辑区，都不复位。
       if (payload?.state === 'idle' || payload?.state === 'warming') resetBarHeight();
 
+      // idle 下整条不渲染（渲染进程直接 return null），所以这张常驻置顶窗口必须**保证**
+      // 鼠标穿透：它占着屏幕右下角 560×148，只要还在抓鼠标，那个位置下面的应用就点不动，
+      // 而用户没有任何线索能猜到是我们在挡（真机反馈：Mac 上 Chrome 网页右下角的按钮
+      // 移上去不变手型、点不动）。
+      // 渲染侧回 idle 时也会发一次 true，但那条依赖它收到 mouseleave —— 条被卸载时那个
+      // 事件永远不会来（元素在指针底下直接消失）。窗口归主进程所有，这里无条件重申一次。
+      // idle 下没有可点的东西（按钮只在 reviewing 渲染），所以这个方向不会误伤。
+      if (payload?.state === 'idle') bar.setIgnoreMouseEvents(true, { forward: true });
+
       // phrases 态**主动抢焦点**（唯一一处）。选择器的全部价值就是键盘输入，
       // 而窗口从 focusable:false 翻成 true 只是「允许被点击」，并不会真的激活；
       // 不调 focus() 的话搜索框收不到按键，搜索与 ↑↓ 全废。

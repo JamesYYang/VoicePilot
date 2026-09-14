@@ -95,6 +95,8 @@ export async function runUiTest() {
     calls: 0,
   };
   const phraseSaveCtl: { payload: { title: string; text: string } | null } = { payload: null };
+  /** 每次 setMousePassthrough 的实参。穿透开关只有一处调用点（鼠标移入/移出），见 26c。 */
+  const passthroughCalls: boolean[] = [];
   let togglePhrasesCalls = 0;
   let usePhraseCalls = 0;
   const touchedIds: number[] = [];
@@ -209,7 +211,9 @@ export async function runUiTest() {
     sendAudio: (meta: { seq: number; cumSamples: number }) => {
       sentFrames.push(meta);
     },
-    setMousePassthrough: () => {},
+    setMousePassthrough: (passthrough: boolean) => {
+      passthroughCalls.push(passthrough);
+    },
     resizeBar: () => {},
     captureFailed: () => {},
   };
@@ -1278,6 +1282,24 @@ export async function runUiTest() {
   await enterPhrases();
   check('进选择器后不再显示上一段的一次性提示',
     hintNode() === null, JSON.stringify(hintNode()));
+
+  // ---- 26c. 条不再渲染时必须恢复穿透（真机反馈：Mac 上 Chrome 右下角的按钮点不动）----
+  // 条是一张常驻的置顶窗口，位置固定在屏幕右下角。鼠标移入时它**临时关掉穿透**（否则条里
+  // 的按钮自己就点不到），而「移出」是靠根节点上的 onMouseLeave 收的 —— 条不再渲染（回
+  // idle）时元素是被直接卸载的，不会再补一个 mouseleave，hovering 就永远停在 true：窗口
+  // 看不见、却一直在吃掉它那块矩形里的点击。用户看到的就是「鼠标移上去不变手型、按钮点
+  // 不动」，且只在右下角那一块（560×148）失效。
+  const barRoot = () => container.querySelector('[data-state]');
+  const lastPassthrough = () => passthroughCalls[passthroughCalls.length - 1];
+  passthroughCalls.length = 0;
+  barRoot()?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  await flush();
+  check('（前提）鼠标移入条时关掉穿透（条里的按钮才点得到）',
+    lastPassthrough() === false, JSON.stringify(passthroughCalls));
+  fire('state', { state: 'idle', notice: null, truncated: false, origin: 'dictation' });
+  await flush();
+  check('条回到 idle（不再渲染）后必须恢复穿透',
+    lastPassthrough() === true, JSON.stringify(passthroughCalls));
 
   // derivePhraseTitle 的边界（纯函数，直接验）
   check('derivePhraseTitle：空串 → 空', derivePhraseTitle('') === '', JSON.stringify(derivePhraseTitle('')));
