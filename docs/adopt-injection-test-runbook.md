@@ -3,6 +3,7 @@
 > 目的：验证「点采纳 → 文本写回快捷键触发那一刻的前台窗口」在真机上真的可用，并把**失败**也验成可感知的。
 > 上游：`docs/superpowers/specs/2026-09-13-adopt-injection-design.md`（设计）；PRD F5 / §4.3 / §8 M5-A；`docs/superpowers/specs/2026-09-12-trial-feedback-design.md` §2.4（降级条件）。
 > 写法参照 `docs/macos-test-runbook.md`：按症状与环境组织，**只写会踩的坑**。
+> **macOS 侧的执行顺序与总清单在 `docs/macos-test-runbook.md`（它的阶段 2 就是本手册）**，本文件只负责细节与判据。
 
 ---
 
@@ -185,7 +186,7 @@ macOS `⌥Space`；Windows `Ctrl+Shift+Space`（F7 可配，若改过以实际�
 ### 为什么必须单独测
 
 - **asar**：开发模式下 `.node` 直接从 `node_modules` 加载，**绕过 asar**。开发模式通过**不能**证明打包版能加载。
-- **macOS 激活行为**：开发模式从终端起的是 `Electron.app`，前台本来就是它，很多「置前 / 焦点」问题在开发模式**根本看不出来**。既有教训：NSPanel 那个坑只在打包版暴露（见 `docs/macos-test-runbook.md` §七.2）。因此**用例 4（A2 回归）在打包版必须再跑一遍**。
+- **macOS 激活行为**：开发模式从终端起的是 `Electron.app`，前台本来就是它，很多「置前 / 焦点」问题在开发模式**根本看不出来**。既有教训：NSPanel 那个坑只在打包版暴露（见 `docs/macos-test-runbook.md` 附录 C.2）。因此**用例 4（A2 回归）在打包版必须再跑一遍**。
 - **macOS arm64 签名**：未签名 / adhoc 的 `.node` 能否 `dlopen`，只在打包版才暴露。
 
 ### Windows

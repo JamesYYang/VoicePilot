@@ -3,6 +3,7 @@
 > 目的：验证「按第二个快捷键 → 选择器拿到键盘 → 挑一条 → 走既有采纳写回」这条链路在真机上真的可用，并把**失败**也验成可感知的。
 > 上游：`docs/superpowers/specs/2026-09-13-common-phrases-design.md`（设计）；PRD F16、§4.3（采纳写回）。
 > 写法参照 `docs/adopt-injection-test-runbook.md`（采纳写回手册）：按症状与环境组织，**只写会踩的坑**。
+> **macOS 侧的执行顺序与总清单在 `docs/macos-test-runbook.md`（它的阶段 3 就是本手册）**，本文件只负责细节与判据。
 >
 > **两个清单的 macOS 部分在同一趟 Mac 上一起跑** —— 常用语复用采纳写回（`activateTarget`），macOS 的窗口激活 / 焦点 / 键盘结论是共用的。跑之前先按采纳写回手册验完。
 
