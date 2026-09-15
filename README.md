@@ -209,6 +209,7 @@ npm run dist:mac            # 打 dir + dmg（未签名）
 
 - **PRD（权威）**：[`docs/plans/2026-09-05-voicepilot-prd.md`](docs/plans/2026-09-05-voicepilot-prd.md)
 - **真机验证手册**（真机结论只能出自这里，自动化全绿 ≠ 可用）：
+  - [`docs/release-checklist.md`](docs/release-checklist.md) — **发版清单**：复验 → 部署端点 → 打包 → 分发，跨三台机器的执行顺序与突发处置
   - [`docs/macos-test-runbook.md`](docs/macos-test-runbook.md) — macOS 总清单（阶段 0–6），改完 macOS 相关代码先看它
   - [`docs/adopt-injection-test-runbook.md`](docs/adopt-injection-test-runbook.md) — 采纳写回（Plan 2B）
   - [`docs/common-phrases-test-runbook.md`](docs/common-phrases-test-runbook.md) — 常用语（F16）
