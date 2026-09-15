@@ -4,7 +4,7 @@
 
 全局快捷键触发，边说话文字边实时上屏；说完一键复制到任意应用，或展开成主应用做润色、调整场景与语气。
 
-> **当前状态**：桌面端（Windows）主链路与主应用已可用，正朝公司内部 50+ 人试用推进。macOS 已能打包运行（托盘图标 / 不抢焦点 / 公司内网证书三个打包后才暴露的问题已修并复验），剩辅助功能授权复验与签名公证；内部试用基建仍在路上。
+> **当前状态**：桌面端（Windows）主链路与主应用已可用，正朝公司内部 50+ 人试用推进。macOS 已能打包运行（托盘图标 / 不抢焦点 / 公司内网证书三个打包后才暴露的问题已修并复验）；**2026-09-15 在 Mac 真机上按 [`docs/macos-test-runbook.md`](docs/macos-test-runbook.md) 跑过一轮**（**控制台启动**，非 Finder 启动打包 `.app`），除采纳写回的两个问题（已修，**待复验**）外其余用例通过。剩：**焦点类用例按打包 `.app` 从 Finder 复跑**、辅助功能授权复验、签名公证；内部试用基建仍在路上。
 > 产品权威文档见 [`docs/plans/2026-09-05-voicepilot-prd.md`](docs/plans/2026-09-05-voicepilot-prd.md)。
 
 ---
@@ -16,7 +16,7 @@
 | | 悬浮条（Mini） | 主应用（Studio） |
 |---|---|---|
 | 触发 | 主快捷键（听写）/ **第二个快捷键（常用语）** | 悬浮条点「打开应用」 |
-| 位置 | 桌面右下角，半透明，置顶，聆听期**不抢焦点** | 普通应用窗口 |
+| 位置 | 桌面右下角，半透明，置顶，聆听期**不抢焦点**。macOS 上空闲时窗口**直接隐藏**（只留托盘），Windows 上常驻可见但鼠标穿透 | 普通应用窗口 |
 | 职责 | 实时听写 + 编辑 + 复制 / 采纳 + 条内润色 + **常用语选择器** | 润色、场景×语气、历史回看、设置、**常用语管理** |
 
 核心流程：**快捷键 → 说话（灰字实时跟随，停顿定稿转白字）→ 停止 → 复制 / 润色 / 采纳**。
@@ -47,8 +47,9 @@
 | M1 采集 spike（Windows） | ✅ 输出字节率合格、无时钟漂移 |
 | M2 主链路（Windows）：快捷键 → 采集 → ASR → 悬浮条 → 复制 | ✅ 完成，自测全绿 |
 | M4 主应用：润色、场景×语气、自定义预设、本地历史 | ✅ 完成 |
-| M3 macOS 适配 + 分发 | 🔄 已能打包运行；托盘 / 不抢焦点 / 公司内网证书已修并复验，剩辅助功能授权复验、签名公证、dmg 分发 |
+| M3 macOS 适配 + 分发 | 🔄 已能打包运行；托盘 / 不抢焦点 / 公司内网证书已修并复验，主链路已按真机清单跑过一轮（2026-09-15，控制台启动）；剩焦点类用例按打包 `.app` 从 Finder 复跑、辅助功能授权复验、签名公证、dmg 分发 |
 | M5-A 试用就绪：Key 下发、设置（快捷键可配 + 开机启动）、诊断导出、F12 按打包 .app 复验 | 🔄 进行中：Key 下发已完成；剩开机启动、诊断导出、F12 按打包 .app 复验 |
+| 试用反馈批次（2026-09-12 ~ 09-15）：条内闭环（润色 / 采纳 / 存常用语 / 打开应用）、采纳写回、常用语 F16、悬浮条窗口行为 | 🔄 已实现，Windows 侧门禁全绿；Mac 真机 2026-09-15 跑过一轮，采纳写回的两个问题已修、**待复验** |
 | M5-B 规模化基建：遥测与错误标记、自动更新、配置下发其余 | ⏸ 未开始 |
 | M6 内部试用运行期（50+ 人使用，收集反馈与错误样本） | ⏸ 未开始 |
 
@@ -60,7 +61,7 @@
 
 - **桌面壳**：Electron 44 + React 19 + TypeScript + Vite（UI 与框架解耦，将来可迁移 Tauri）
 - **ASR**：阿里云百炼 `qwen-audio-3.0-asr-flash-streaming`（实时 WebSocket，灰字→白字两态）
-- **润色 LLM**：百炼 `deepseek-v4-pro-0813`（流式，与 ASR 共用一把 Key）
+- **润色 LLM**：百炼 `deepseek-v4-flash-0731`（流式，与 ASR 共用一把 Key；2026-09-12 试用反馈「快捷三项」由 `deepseek-v4-pro-0813` 换成 flash，速度优先）
 - **本地存储**：Node 内建 `node:sqlite`（SQLite，历史 / 预设 / 设置，零原生依赖）
 
 ---
@@ -95,11 +96,18 @@ npm start          # vite build && electron .
 ```bash
 cd app
 npx tsc --noEmit                          # 全量类型检查
-VP_UI_SELFTEST=1 npx electron .           # 界面自测（隐藏窗口 + 假 bridge，跑前先 npm run build）
-VP_STORE_SELFTEST=1 npx electron .        # 存储自测
-VP_SM_SELFTEST=1 npx electron .           # 状态机自测
+npm run build                             # 渲染产物；下面凡带界面的自测都必须先跑这步
+
+VP_SM_SELFTEST=1 npx electron .           # 状态机与背压
+VP_INJECT_SELFTEST=1 npx electron .       # 采纳写回的编排（切前台 → 回读确认 → 才发键）；不含真实置前/粘贴
+VP_STORE_SELFTEST=1 npx electron .        # 存储
+VP_UI_SELFTEST=1 npx electron .           # 界面自测（隐藏窗口 + 假 bridge）
 VP_BAR_SELFTEST=1 npx electron .          # 悬浮条几何（真窗口：贴边不漂移 / 每次打开选择器都长到合身高度；需要显示器）
 ```
+
+> ⚠️ **`VP_UI_SELFTEST` 与 `VP_BAR_SELFTEST` 跑前必须先 `npm run build`**：这两条渲染真实界面，读的是 `dist/renderer`。忘了 build 就会拿上一次的产物跑出一片绿，而结论与当前源码无关（已踩过：界面自测曾对着落后一天的包报「全绿」）。
+>
+> 其余自测（`VP_POLISH_SELFTEST` / `VP_I18N_SELFTEST` / `VP_SHORTCUT_SELFTEST` / `VP_CONFIG_SELFTEST` / `VP_ASR_SELFTEST`）见 `app/electron/main.js` 的分发链；`VP_CONFIG_SELFTEST` 的用法另见下文「Key 下发」。
 
 ---
 
@@ -189,7 +197,8 @@ npm run dist:mac            # 打 dir + dmg（未签名）
 ├── demo/                     早期浏览器原型（历史产物，已由桌面端取代）
 └── docs/
     ├── plans/                PRD 与早期设计文档
-    └── superpowers/          specs 与实现计划
+    ├── superpowers/          specs 与实现计划
+    └── *-test-runbook.md     真机验证手册（macOS 总清单 / 采纳写回 / 常用语）
 ```
 
 `spike/` 是验证工具链，不是产品代码。它负责回答「延迟达不达标、准确率多少、并发上限多少」这类问题，支撑 PRD 里的数据。
@@ -199,19 +208,25 @@ npm run dist:mac            # 打 dir + dmg（未签名）
 ## 设计文档
 
 - **PRD（权威）**：[`docs/plans/2026-09-05-voicepilot-prd.md`](docs/plans/2026-09-05-voicepilot-prd.md)
+- **真机验证手册**（真机结论只能出自这里，自动化全绿 ≠ 可用）：
+  - [`docs/macos-test-runbook.md`](docs/macos-test-runbook.md) — macOS 总清单（阶段 0–6），改完 macOS 相关代码先看它
+  - [`docs/adopt-injection-test-runbook.md`](docs/adopt-injection-test-runbook.md) — 采纳写回（Plan 2B）
+  - [`docs/common-phrases-test-runbook.md`](docs/common-phrases-test-runbook.md) — 常用语（F16）
 - **主应用设计**：[`docs/superpowers/specs/2026-09-06-main-app-design.md`](docs/superpowers/specs/2026-09-06-main-app-design.md)
 - **M4 剩余项设计**：[`docs/superpowers/specs/2026-09-06-m4-remaining-design.md`](docs/superpowers/specs/2026-09-06-m4-remaining-design.md)
+- **采纳写回设计**：[`docs/superpowers/specs/2026-09-13-adopt-injection-design.md`](docs/superpowers/specs/2026-09-13-adopt-injection-design.md)
+- **常用语设计**：[`docs/superpowers/specs/2026-09-13-common-phrases-design.md`](docs/superpowers/specs/2026-09-13-common-phrases-design.md)
 - **ASR 实测结论与踩坑**：[`docs/plans/2026-08-31-engine-mvp-design.md`](docs/plans/2026-08-31-engine-mvp-design.md)
 
 ---
 
 ## 已知限制 / 下一步
 
-- **macOS 未签名 / 未公证**：已能打包运行（托盘图标、不抢焦点、公司内网证书三个打包后才暴露的问题均已修并复验），但未做 Developer ID 签名与公证，首次打开需「右键 → 打开」；辅助功能授权（F12 引导）待按打包后的 `.app` 复验。
+- **macOS 未签名 / 未公证**：已能打包运行（托盘图标、不抢焦点、公司内网证书三个打包后才暴露的问题均已修并复验），但未做 Developer ID 签名与公证，首次打开需「右键 → 打开」。辅助功能授权（F12 引导）与**焦点类用例**都待按**打包后从 Finder 启动的 `.app`** 复验 —— 2026-09-15 那轮 Mac 真机是**控制台启动**的，按 runbook 的规矩它**不能替代**这一步。
 - **Key 已改为端点下发，但客户端仍持有明文**：打包版启动时从公司内网 HTTPS 端点取回 Key（见「Key 下发（内网端点）」），正常不再需要人工分发。⚠️ 端点下发**不等于** Key 不落地——取回后 Key 仍在主进程持有明文，有本机权限的人仍可提取；真正让客户端不持有 Key 只有服务端代理，本期不做，这是已接受的代价。轮换：改服务端 `VP_DASHSCOPE_API_KEY`（并把 `VP_CONFIG_VERSION` 加一）重启即可，无需重发包；换 token 需重新打包重发。边界见设计文档 §0。
 - **首次引导已启用**：职业维度已移除（2026-09-08），F8 改为欢迎页，首次启动弹一次；原 `VP_ENABLE_ONBOARDING` 开关已删除。
-- **采纳写回已实现（尽力而为）**：点「采纳」会把文本写回**快捷键触发那一刻的前台窗口**（剪贴板 + 模拟一次粘贴键，主进程经 `koffi` 直调系统 API），失败时回退为「已复制，请手动粘贴」。**天花板（已接受，不修）**：① 管理员权限窗口（Windows UIPI）**可能**收不到非提权进程的合成按键 → 可能静默失败（待验，见 runbook 用例 3）；② 终端与部分特殊控件的粘贴行为不一致；③ 中文 IME 组字态可能吞掉 Ctrl+V；④ **剪贴板从不还原**（反正文本就留在剪贴板里，失败时手动粘即可）。成功判据是「目标窗口确实到了前台」，不是「粘贴被消费了」——后者原理上不可检，所以 ① 这类漏报无法避免。⚠️ **代码已实现、自动化自测全绿，但真实置前/粘贴、macOS 侧与打包版尚未真机验证**——验证清单见 [`docs/adopt-injection-test-runbook.md`](docs/adopt-injection-test-runbook.md)。
-- **常用语已实现（F16）**：悬浮条内可用第二个快捷键唤起选择器——搜索 / `↑` / `↓` / `Enter` / `Esc`，挑一条落进编辑区再走既有「采纳」写回；条头书签图标可从听写结果一键存一条，Studio 新增「常用语」页可手写 / 改名 / 删除。常用语**不与场景语气绑定、不落历史**，管理页在 Studio。**不含**（设计已排除，不是缺陷）：占位符 / 模板变量、按场景分组、重复去重、跨设备同步、从历史页提升为常用语、选择器失焦自动关闭。⚠️ **代码已实现、自动化自测全绿，但选择器能否拿到键盘、关掉后焦点是否归还、真实写回尚未真机验证**（macOS 面板能否接受键盘输入是最高风险项）——验证清单见 [`docs/common-phrases-test-runbook.md`](docs/common-phrases-test-runbook.md)。
+- **采纳写回已实现（尽力而为）**：点「采纳」会把文本写回**快捷键触发那一刻的前台窗口**（剪贴板 + 模拟一次粘贴键，主进程经 `koffi` 直调系统 API），失败时回退为「已复制，请手动粘贴」。**天花板（已接受，不修）**：① 管理员权限窗口（Windows UIPI）**可能**收不到非提权进程的合成按键 → 可能静默失败（待验，见 runbook 用例 3）；② 终端与部分特殊控件的粘贴行为不一致；③ 中文 IME 组字态可能吞掉 Ctrl+V；④ **剪贴板从不还原**（反正文本就留在剪贴板里，失败时手动粘即可）。成功判据是「目标窗口确实到了前台」，不是「粘贴被消费了」——后者原理上不可检，所以 ① 这类漏报无法避免。**真机状态（2026-09-15，Mac 控制台启动）**：首轮暴露两个问题、均已修 —— ① **回填不了**（发键从「只给 V 贴 Command 标志再丢进 HID tap」改为整串 `[⌘↓ V↓ V↑ ⌘↑]` 并优先投到目标 pid）；② **回填成功、条也关了，目标应用却拿不到焦点**（改为「先关条 → 等编辑区拆完 → 再还键盘」，且 macOS 空闲态窗口直接隐藏）。**⚠️ 修后的版本尚未复验**；打包版 `dlopen` 的 Mac 侧、以及「管理员权限窗口静默失败」仍是未验项。验证清单见 [`docs/adopt-injection-test-runbook.md`](docs/adopt-injection-test-runbook.md)。
+- **常用语已实现（F16）**：悬浮条内可用第二个快捷键唤起选择器——搜索 / `↑` / `↓` / `Enter` / `Esc`，挑一条落进编辑区再走既有「采纳」写回；条头书签图标可从听写结果一键存一条，Studio 新增「常用语」页可手写 / 改名 / 删除。常用语**不与场景语气绑定、不落历史**，管理页在 Studio。**不含**（设计已排除，不是缺陷）：占位符 / 模板变量、按场景分组、重复去重、跨设备同步、从历史页提升为常用语、选择器失焦自动关闭。**真机状态（2026-09-15，Mac 控制台启动）**：**F16 自身全部通过** —— 选择器能拿到键盘（macOS 上 `reviewing` 可聚焦 panel 可正常接受输入，这一条原是最高风险项）、`Esc` 与「再按一次快捷键」都能关闭并归还焦点、常用语不进历史。选中之后的**写回**与采纳共用同一条路径，那两个问题见上一条（已修、待复验）。验证清单见 [`docs/common-phrases-test-runbook.md`](docs/common-phrases-test-runbook.md)。
 - **历史搜索未做**：当前历史只支持浏览，全文搜索（FTS5）属下一批。
 - **开机启动未做**：设置界面已交付（语言、主/常用语两个快捷键的录制、权限状态与引导），仍缺「开机启动」（F7，归 M5-A）。「触发模式」已随 2026-09-11 的决定去掉——F1 只保留「按一下开始 / 再按一下停止」单模式；词表本期留空。
 - **准确率无 ground truth**：字准确率验收依赖内部试用期的错误标记数据（M6）。
