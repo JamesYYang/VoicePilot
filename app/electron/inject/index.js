@@ -91,7 +91,7 @@ async function decidePaste(platform, target) {
     const act = await activateStep(platform, target);
     if (!act.ok) return act;
 
-    platform.sendPaste();
+    platform.sendPaste(target);
     return { ok: true };
   } catch (e) {
     console.warn(`[注入] 粘贴失败：${e?.message ?? e}`);

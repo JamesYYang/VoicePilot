@@ -67,8 +67,6 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
       // 会话回到 idle/warming 时把窗口收回基础高度。resizeBar 只增不减，不复位
       // 就会让下一段空文本继承上一段的高窗（见 main.js resetBarHeight）。listening/
       // draining 会长文本、reviewing 要放编辑区，都不复位。
-      if (payload?.state === 'idle' || payload?.state === 'warming') resetBarHeight();
-
       // idle 下整条不渲染（渲染进程直接 return null），所以这张常驻置顶窗口必须**保证**
       // 鼠标穿透：它占着屏幕右下角 560×148，只要还在抓鼠标，那个位置下面的应用就点不动，
       // 而用户没有任何线索能猜到是我们在挡（真机反馈：Mac 上 Chrome 网页右下角的按钮
@@ -77,6 +75,20 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
       // 事件永远不会来（元素在指针底下直接消失）。窗口归主进程所有，这里无条件重申一次。
       // idle 下没有可点的东西（按钮只在 reviewing 渲染），所以这个方向不会误伤。
       if (payload?.state === 'idle') bar.setIgnoreMouseEvents(true, { forward: true });
+
+      // macOS：点过可聚焦的条之后，常驻 NSPanel 即使 focusable:false 也会占着 key
+      // window，备忘录看起来仍是前台、输入框却收不到键。idle 直接 hide，把 key
+      // 还给上一扇窗；下次进非 idle 再 showInactive，不激活自己。
+      // 必须在 resetBarHeight 之前 hide，避免对可见窗 setBounds 再抢一次焦点。
+      if (process.platform === 'darwin') {
+        if (payload?.state === 'idle') {
+          if (bar.isVisible()) bar.hide();
+        } else if (!bar.isVisible()) {
+          bar.showInactive();
+        }
+      }
+
+      if (payload?.state === 'idle' || payload?.state === 'warming') resetBarHeight();
 
       // phrases 态**主动抢焦点**（唯一一处）。选择器的全部价值就是键盘输入，
       // 而窗口从 focusable:false 翻成 true 只是「允许被点击」，并不会真的激活；
@@ -245,6 +257,9 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
 
     let r;
     try {
+      // 这里只许**粘贴**。关条与「记下归还目标」都不在这条路径上，见 vp:adopt/close ——
+      // 它们必须由状态机在同一个同步块里判断「是否仍停在 reviewing」，不能在渲染进程
+      // 收到结果之后再补一发 toggle()：那中间隔着一次 IPC 往返，状态可能已经被用户抢走。
       r = await pasteTo(machine.getTarget());
     } finally {
       // ⚠️ 是否恢复**必须按当前状态**判断，不能拿上面的 wasFocusable 当条件。
@@ -281,6 +296,23 @@ export function registerIpc({ getBar, requestQuit, attachDevLogging, resizeBar, 
     }
     return r;
   });
+
+  /**
+   * 采纳写回成功后关条。**必须走状态机，不能让渲染进程直接调 vp:session/toggle**：
+   * toggle 是按**当前**状态分派的，而写回至少要等一次激活（≥120ms），这段时间里用户
+   * 可能已经自己关了条、或连按快捷键开了下一段（见上面那段竞态注释）。那时 toggle 会
+   * 在 idle 上 start()、在 warming 上 cancel —— 把用户刚起头的下一次听写静默吃掉。
+   *
+   * 状态机内部先判断「仍停在 reviewing」再动，所以返回 closed:false 就等于
+   * 「不用关了，而且什么都别做」：调用方此时也不该还键盘（用户已经走了）。
+   */
+  ipcMain.handle('vp:adopt/close', () => machine.dismissForAdopt());
+
+  /**
+   * 采纳写回成功、条已回到 idle 之后再调：把键盘还给目标应用。
+   * 必须发生在渲染进程拆完编辑区之后，否则 unmount 会把刚还回去的焦点抢走。
+   */
+  ipcMain.handle('vp:adopt/restore-focus', () => machine.restorePending());
 
   // ---------------------------------------------------------------- 通用
 

@@ -439,6 +439,55 @@ async function testPhrases() {
   check('听写来的 reviewing 关闭时不置前（既有行为不变）',
     h.calls.activate === 0, `${h.calls.activate} 次`);
 
+  // 采纳成功：dismissForAdopt 关条并同时记下**这次写回用的**目标；拆条那一刻还不置前，
+  // 等渲染进程拆完编辑区再 restorePending 归还（顺序是安全属性，见 #settleToIdle）。
+  const adopt = mk({ shouldRestoreFocus: false });
+  await adopt.m.start();
+  await adopt.m.toggle(); // → reviewing
+  const adopted = await adopt.m.dismissForAdopt();
+  check('采纳成功：dismissForAdopt 关条回 idle',
+    adopted.closed === true && adopt.m.state === 'idle',
+    JSON.stringify({ r: adopted, state: adopt.m.state }));
+  check('采纳关闭时还不置前（等 restorePending）',
+    adopt.calls.activate === 0, `${adopt.calls.activate} 次`);
+  await adopt.m.restorePending();
+  check('restorePending 后归还焦点', adopt.calls.activate === 1, `${adopt.calls.activate} 次`);
+  check('归还的是这次写回用的那个目标',
+    JSON.stringify(adopt.activated[0]) === JSON.stringify({ kind: 'win', hwnd: 5 }),
+    JSON.stringify(adopt.activated[0]));
+  check('采纳归还发生在回 idle 之后',
+    adopt.stateAtActivate[0] === 'idle', String(adopt.stateAtActivate[0]));
+
+  // 状态已被用户抢走（写回那 100+ms 里连按快捷键 / 手动关条）→ 不许再关一次。
+  // 锁的是「按**当前**状态分派」这个坑：idle 上 toggle 会去 start()，等于把用户的
+  // 下一次听写吃掉（warming 上则是 cancel）。闸门必须比这条路径先拦下来。
+  const stolen = mk({ shouldRestoreFocus: false });
+  await stolen.m.start();
+  await stolen.m.toggle(); // → reviewing
+  await stolen.m.toggle(); // 用户抢先关掉 → idle
+  FakeSession.all = []; // 从这一刻起数会话，把上面那次 start() 排除掉
+  const afterSteal = await stolen.m.dismissForAdopt();
+  check('状态已离开 reviewing 时不再关条',
+    afterSteal.closed === false && stolen.m.state === 'idle',
+    JSON.stringify({ r: afterSteal, state: stolen.m.state }));
+  check('状态已离开 reviewing 时不建新会话（不吞掉用户的下一次听写）',
+    FakeSession.all.length === 0, `${FakeSession.all.length} 个会话`);
+  await stolen.m.restorePending();
+  check('状态已离开 reviewing 时不置前', stolen.calls.activate === 0, `${stolen.calls.activate} 次`);
+
+  // 重复调用（双击采纳、两次 IPC 竞态）：第二次不许把已记下的归还目标冲掉 ——
+  // 冲掉的表现是 restorePending 变成空操作、焦点静默不还，所以断言落在 activate 次数上。
+  const dup = mk({ shouldRestoreFocus: false });
+  await dup.m.start();
+  await dup.m.toggle(); // → reviewing
+  await dup.m.dismissForAdopt();
+  const dupAgain = await dup.m.dismissForAdopt();
+  check('重复调用不再关条（此时已不在 reviewing）',
+    dupAgain.closed === false, JSON.stringify(dupAgain));
+  await dup.m.restorePending();
+  check('重复调用后仍然只归还一次（目标没被冲掉）',
+    dup.calls.activate === 1, `${dup.calls.activate} 次`);
+
   // ---- start() 把 origin 重置回 dictation ----
   const i = mk();
   await i.m.openPhrases();

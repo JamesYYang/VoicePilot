@@ -44,6 +44,48 @@ const BAR_EDITOR_MIN_HEIGHT = 96;
 /** 窗口高 = 根内容区 + 18：上下 margin 8×2 与 border 1×2，两者都不计入 scrollHeight/clientHeight。 */
 const BAR_MARGINS = 18;
 
+/**
+ * 采纳写回收尾时「等编辑区拆完」的超时后路。
+ *
+ * 正常路径是两帧（约 33ms，真机验过）；这个上限只服务于 rAF 被饿死的那种退化，
+ * 所以取到「比正常高一个多数量级」，避免在机器很忙、帧变慢时**抢跑**到 unmount 之前
+ * 去还键盘 —— 那正好会重新制造它要防的问题（unmount 把刚还回去的焦点抢走）。
+ * 实测参考：从未显示过的隐藏窗里，嵌套两帧要 ~1.4s 才到齐（见界面自测 23d）。
+ */
+const UNMOUNT_FRAMES_TIMEOUT_MS = 1500;
+
+/**
+ * 等渲染进程把编辑区拆掉（unmount）再还键盘。反过来 unmount 会把刚还回去的焦点抢走 ——
+ * 真机反馈的「回填成功但主应用拿不到焦点、不能继续输入」就是它。
+ * 用两帧而不是固定延时：React 提交后下一帧就已经摘干净。
+ *
+ * ⚠️ 这条路径对「隐藏窗口 + 帧」很敏感：调用点此刻刚把条 hide() 掉，而隐藏窗口的
+ * `requestAnimationFrame` 会被饿死 —— 饿死时这个 await 会**永久挂住**，焦点归还
+ * 不执行，而且没有任何日志（不是抛错、不是超时，什么都没有）。
+ * 条今天能按时跑完（真机验过），但**改动条的任何窗口参数、或把 hide() 提前/挪位，
+ * 都必须重跑「采纳后光标是否回到目标」**（runbook 阶段 2）。超时后路就是为这种
+ * 静默退化留的：真到了那一步，退化成「还晚一点」并留下告警，而不是永远不还。
+ */
+export function waitForUnmountFrames(timeoutMs = UNMOUNT_FRAMES_TIMEOUT_MS): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const once = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    requestAnimationFrame(() => requestAnimationFrame(once));
+    setTimeout(() => {
+      if (settled) return;
+      console.warn(
+        `[采纳] 拆条两帧在 ${timeoutMs}ms 内没到齐，按超时继续归还焦点 —— ` +
+          '悬浮条隐藏后 rAF 被饿死了？查 createBar 的窗口参数与 hide() 时机'
+      );
+      once();
+    }, timeoutMs);
+  });
+}
+
 type SessionState = 'idle' | 'warming' | 'listening' | 'draining' | 'reviewing' | 'phrases';
 
 interface Notice {
@@ -700,8 +742,17 @@ export default function App({ bridge, createCapture }: AppProps = {}) {
       console.warn(`[采纳] 写回通道失败：${e instanceof Error ? e.message : String(e)}`);
     }
     if (r.ok) {
-      // 写回成功：与「复制」同一收尾（reviewing 下 toggle 的语义就是关闭）。
-      void vp.toggle();
+      // 关条走守卫通道，**不能**直接调 vp.toggle()：toggle 是按**当前**状态分派的，
+      // 而写回要等一次激活（≥120ms），这段时间里用户可能已经自己关了条、或连按快捷键
+      // 开了下一段。那时 toggle 会在 idle 上 start()、在 warming 上 cancel ——
+      // 把用户刚起头的下一次听写静默吃掉。状态机在同一个同步块里判断完才动手，
+      // 回 closed:false 就表示「不用关了，而且什么都别做」。
+      const { closed } = await vp.closeAdoptBar();
+      if (!closed) return;
+      // 先关条（拆编辑区）再还键盘，这个次序是安全属性：反过来 unmount 会把刚还回去的
+      // 键盘焦点抢回来（真机反馈的「回填成功但主应用拿不到焦点」）。
+      await waitForUnmountFrames();
+      await vp.restoreAdoptFocus();
       return;
     }
     setHint(ADOPT_FAIL_TEXT[r.reason] ?? t('bar.adopt.fail'));

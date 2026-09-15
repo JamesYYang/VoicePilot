@@ -91,6 +91,10 @@ interface VoicePilotBridge {
     | { ok: true }
     | { ok: false; reason: 'no-target' | 'stale' | 'activate-failed' | 'send-failed' | 'permission' }
   >;
+  /** 采纳写回成功后关条；closed:false = 状态已被用户抢走，不要再还键盘。 */
+  closeAdoptBar(): Promise<{ closed: boolean }>;
+  /** 条拆完后再把键盘还给目标应用。 */
+  restoreAdoptFocus(): Promise<{ ok: true }>;
   onState(cb: (s: SessionSnapshot) => void): () => void;
   onPartial(cb: (p: AsrPartial) => void): () => void;
   onError(cb: (e: { kind: string; message: string; preserveText: boolean }) => void): () => void;

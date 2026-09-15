@@ -75,6 +75,7 @@ export class SessionMachine {
   #origin = 'dictation';
   #activateTarget;
   #shouldRestoreFocus;
+  #pendingRestore = null;
 
   /**
    * @param emit          向渲染进程推送
@@ -127,6 +128,36 @@ export class SessionMachine {
   /** 快捷键触发那一刻的前台窗口。采纳时用它作为写回目标。 */
   getTarget() {
     return this.#target;
+  }
+
+  /**
+   * 采纳写回成功后的收尾：关条，并记下目标等条拆完（回 idle / unmount）再由
+   * restorePending 归还。不能在 #dismiss 里立刻置前 —— 渲染进程随后卸载编辑区会
+   * 把刚还回去的键盘焦点抢走。
+   *
+   * **闸门是这条路径的全部要害**：写回要等一次激活（≥120ms），这段时间里用户可能
+   * 已经自己把条关了、或连按快捷键开了下一段（ipc.js 里那段竞态注释描述的就是它）。
+   * 那时状态已经不是 reviewing，而 toggle() 是**按当前状态分派**的 —— idle 上它会
+   * start() 开一次新会话（用户的下一次听写被静默吃掉），warming 上它会 cancel。
+   * 所以这里必须自己判断，不能把「关条」交给一个状态盲的 toggle()。
+   *
+   * 闸门与取样 `#target` 之间**不能有 await**：两者之间一旦让出执行权，
+   * `#target` 就可能被 #settleToIdle 清成 null，记下来的是一个永远不该归还的 null。
+   */
+  async dismissForAdopt() {
+    if (this.#state !== 'reviewing') return { closed: false };
+    this.#pendingRestore = this.#target;
+    await this.#dismiss();
+    return { closed: true };
+  }
+
+  /** 拆条完成后再把前台还给 dismissForAdopt 记下的那个目标。 */
+  async restorePending() {
+    const target = this.#pendingRestore;
+    this.#pendingRestore = null;
+    if (!target) return { ok: true };
+    await this.#restoreFocus(target);
+    return { ok: true };
   }
 
   // ------------------------------------------------------------ 外部输入
@@ -218,6 +249,9 @@ export class SessionMachine {
     const restore = gate ? this.#readGate(gate) : false;
     if (clearQueue) this.#queue.clear();
     this.#target = null;
+    // ⚠️ 这里**故意不动** #pendingRestore。采纳一路的归还目标正是靠它跨过拆条
+    // （dismissForAdopt 记下 → 渲染进程拆完编辑区 → restorePending 取用），
+    // 顺手在这里清成 null 会让采纳成功后焦点静默不还。
     this.#origin = 'dictation';
     this.#setState('idle');
     if (restore) await this.#restoreFocus(target);
@@ -253,6 +287,7 @@ export class SessionMachine {
     this.#attempt = 0;
     this.#truncated = false;
     this.#origin = 'dictation';
+    this.#pendingRestore = null;
     this.#notice = null;
     this.#lastDurationMs = null;
     this.#queue.clear();
@@ -380,6 +415,7 @@ export class SessionMachine {
     // 只有「从常用语来的 reviewing」需要归还：那条路的焦点是我们主动拿的
     // （见 openPhrases 与 ipc.js 的 focus()）。听写一路的焦点从来不是我们拿的，
     // 且用户可能中途点开了别的应用 —— 无条件置前会把焦点从他刚切过去的地方拽回来。
+    // 采纳成功的归还不走这里，见 dismissForAdopt / restorePending。
     const fromPhrase = this.#origin === 'phrase';
     // 顺序（含闸门取样时机）与 #closePhrases 完全一致，见 #settleToIdle。
     await this.#settleToIdle({

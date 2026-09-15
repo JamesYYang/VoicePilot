@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import App from '../App';
+import App, { waitForUnmountFrames } from '../App';
 import Studio from '../studio/Studio';
 import SettingsView from '../studio/SettingsView';
 import { I18nProvider } from '../i18n';
@@ -94,6 +94,17 @@ export async function runUiTest() {
     result: { ok: true },
     calls: 0,
   };
+  // 采纳成功后的收尾：关条 → 拆完编辑区 → 还键盘。走动的是**两个**通道，所以
+  // 单个 toggleCount 已经不足以描述它 —— 顺序本身是安全属性（反过来 unmount 会把
+  // 刚还回去的焦点抢走），必须按调用次序记下来才锁得住。
+  const closeAdoptBarCtl: {
+    result: Awaited<ReturnType<Window['voicepilot']['closeAdoptBar']>>;
+    calls: number;
+  } = {
+    result: { closed: true },
+    calls: 0,
+  };
+  const adoptTailCalls: string[] = [];
   const phraseSaveCtl: { payload: { title: string; text: string } | null } = { payload: null };
   /** 每次 setMousePassthrough 的实参。穿透开关只有一处调用点（鼠标移入/移出），见 26c。 */
   const passthroughCalls: boolean[] = [];
@@ -139,6 +150,15 @@ export async function runUiTest() {
     adoptPaste: () => {
       adoptPasteCtl.calls += 1;
       return Promise.resolve(adoptPasteCtl.result);
+    },
+    restoreAdoptFocus: () => {
+      adoptTailCalls.push('restore');
+      return Promise.resolve({ ok: true as const });
+    },
+    closeAdoptBar: () => {
+      closeAdoptBarCtl.calls += 1;
+      adoptTailCalls.push('close');
+      return Promise.resolve(closeAdoptBarCtl.result);
     },
     reportPainted: (at: number) => real.reportPainted(at),
     openStudio: (payload: { text: string; historyId?: number }) => {
@@ -919,13 +939,17 @@ export async function runUiTest() {
     };
   }
   const toggleBefore = toggleCount;
+  closeAdoptBarCtl.calls = 0;
+  closeAdoptBarCtl.result = { closed: true };
+  adoptTailCalls.length = 0;
   // 采纳链里含**真实的** vp.copy（跨进程 + 剪贴板写入，剪贴板被占用时能到数秒），
   // 所以这里一律用 waitFor 等条件成立，**不能**用固定 30ms 的 flush ——
   // 否则断言跑在实际结果之前，表现为间歇性红（本文件顶部 waitFor 的注释就是为此写的）。
   const adoptHintText = () =>
     container.querySelector('[data-testid="bar-hint-adopt"]')?.textContent ?? null;
   clickButton('采纳');
-  await waitFor(() => toggleCount === toggleBefore + 1);
+  await waitFor(() => closeAdoptBarCtl.calls === 1);
+  await waitFor(() => adoptTailCalls.includes('restore'));
   // 同上：显式断言绕开流收窄，否则 adoptCall.payload 被判成 never
   const barAdopted = adoptCall.payload as
     { id?: number; polished: string; scene: string; tone: string } | null;
@@ -942,7 +966,16 @@ export async function runUiTest() {
   // 采纳成功 = 真写回成功 → 悬浮条关闭，且**不该有任何提示**。
   // 旧形态（复制 + 兜底提示）已不存在：提示只在写回失败时出现。
   check('采纳成功时调用了写回通道', adoptPasteCtl.calls === 1, `${adoptPasteCtl.calls} 次`);
-  check('采纳成功后关闭悬浮条', toggleCount === toggleBefore + 1, `${toggleBefore} → ${toggleCount}`);
+  check('采纳成功后关闭悬浮条', closeAdoptBarCtl.calls === 1, `${closeAdoptBarCtl.calls} 次`);
+  // 关条与还键盘**必须这个次序**：反过来的话，随后拆编辑区的 unmount 会把刚还回去的
+  // 键盘焦点抢回来 —— 真机反馈的「回填成功但主应用拿不到焦点」就是它。
+  check('采纳成功后先关条再还键盘（顺序是安全属性）',
+    adoptTailCalls.join(',') === 'close,restore', JSON.stringify(adoptTailCalls));
+  // 采纳成功**不该再走** toggle：那条路是按当前状态分派的，写回期间状态一旦被用户
+  // 抢走（自己关条 / 连按快捷键开下一段），它就会在 idle 上 start()、在 warming 上
+  // cancel，把用户刚起头的那次听写静默吃掉。
+  check('采纳成功不再走状态盲的 toggle', toggleCount === toggleBefore,
+    `${toggleBefore} → ${toggleCount}`);
   check('采纳成功不留任何提示节点',
     container.querySelectorAll('[data-testid^="bar-hint"]').length === 0,
     JSON.stringify(Array.from(container.querySelectorAll('[data-testid^="bar-hint"]')).map((n) => n.textContent)));
@@ -954,6 +987,8 @@ export async function runUiTest() {
   await enterReviewing();
   copyCtl.text = null;
   const toggleBeforeFail = toggleCount;
+  closeAdoptBarCtl.calls = 0;
+  adoptTailCalls.length = 0;
   adoptPasteCtl.result = { ok: false, reason: 'activate-failed' };
   adoptPasteCtl.calls = 0;
   clickButton('采纳');
@@ -961,6 +996,8 @@ export async function runUiTest() {
   check('写回失败时确实调了写回通道', adoptPasteCtl.calls === 1, `${adoptPasteCtl.calls} 次`);
   check('写回失败时不关闭悬浮条', toggleCount === toggleBeforeFail,
     `${toggleBeforeFail} → ${toggleCount}`);
+  check('写回失败时也不关条、不还键盘',
+    adoptTailCalls.length === 0, JSON.stringify(adoptTailCalls));
   check('写回失败时剪贴板已写好（不还原）', copyCtl.text !== null, JSON.stringify(copyCtl.text));
   check('activate-failed 给出通用失败提示',
     adoptHintText() === '自动写回失败，已复制到剪贴板，请手动粘贴',
@@ -984,6 +1021,60 @@ export async function runUiTest() {
   check('stale 指出目标窗口已关闭',
     adoptHintText() === '目标窗口已关闭，已复制到剪贴板，请手动粘贴',
     JSON.stringify(adoptHintText()));
+
+  // ---- 23c. 关条时状态已被用户抢走：什么都不做 ----
+  // 写回那 100+ms 里用户可能已经自己关了条、或连按快捷键开了下一段。此时状态机那条
+  // 闸门返回 closed:false，渲染进程**连键盘都不该还** —— 用户已经走了，把焦点拽回旧目标
+  // 才是错的（听写一路的焦点本来就不是我们拿的）。
+  await enterReviewing();
+  copyCtl.text = null;
+  adoptPasteCtl.result = { ok: true };
+  adoptPasteCtl.calls = 0;
+  closeAdoptBarCtl.result = { closed: false };
+  closeAdoptBarCtl.calls = 0;
+  adoptTailCalls.length = 0;
+  clickButton('采纳');
+  await waitFor(() => closeAdoptBarCtl.calls === 1);
+  await flush();
+  check('状态被用户抢走时不还键盘（closed:false 就到此为止）',
+    adoptTailCalls.join(',') === 'close', JSON.stringify(adoptTailCalls));
+  closeAdoptBarCtl.result = { closed: true };
+
+  // ---- 23d. 拆条两帧的等待：这里只验「不会永远挂住」那一半 ----
+  // 这条等待发生在条**刚被 hide() 之后**，能否结束全靠 rAF 还会不会回调。
+  // 本窗口是 show:false 且**从未显示过**，实测它根本喂不出帧：嵌套两帧
+  // （rAF 里再排一帧，与 waitForUnmountFrames 同形）要 ~1.4s 才到齐 ——
+  // 而且给本窗口加上 backgroundThrottling:false 也一样（1416ms vs 1417ms，实测过）。
+  // 所以**正常路径在本窗口量不出来**（正常是两帧 ≈33ms），那属真机（runbook 阶段 2）；
+  // 这里能确定性验的是退化那一半：rAF 永不回调时这个 await 必须按时返回。
+  // 裸的双 rAF 会让它永久挂住 —— 焦点归还不执行，而且没有任何日志。
+  const framesProbe = await new Promise<number>((res) => {
+    const t0 = Date.now();
+    const timer = setTimeout(() => res(-1), 1500);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        clearTimeout(timer);
+        res(Date.now() - t0);
+      })
+    );
+  });
+  console.log(
+    `[探测] 本窗口（show:false、从未显示）嵌套两帧 ${
+      framesProbe < 0 ? '>1500' : framesProbe
+    }ms —— 正常路径只能真机验，这里只验退化那一半`
+  );
+  // 外面套 race 只是为了让失败时断言能落地，不至于把整个自测挂死。
+  const rafBackup = window.requestAnimationFrame;
+  window.requestAnimationFrame = () => 0;
+  const tDead = Date.now();
+  const rafDead = await Promise.race([
+    waitForUnmountFrames(60).then(() => 'returned' as const),
+    sleep(2000).then(() => 'hung' as const),
+  ]);
+  window.requestAnimationFrame = rafBackup;
+  check('rAF 不再回调时按超时返回（不会永久挂住）',
+    rafDead === 'returned' && Date.now() - tDead < 1500,
+    `${rafDead} ${Date.now() - tDead}ms`);
 
   // 复位，避免影响后面的用例（第 24 段起还会复用这棵 App 树）
   adoptPasteCtl.result = { ok: true };

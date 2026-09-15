@@ -103,8 +103,9 @@ export async function runInjectSelftest() {
           calls.activate += 1;
           return activateResult;
         },
-        sendPaste: () => {
+        sendPaste: (target) => {
           calls.send += 1;
+          calls.target = target;
         },
       },
     };
@@ -122,10 +123,11 @@ export async function runInjectSelftest() {
     rMismatch?.reason === 'activate-failed' && mismatched.calls.send === 0,
     JSON.stringify({ r: rMismatch, send: mismatched.calls.send }));
 
+  const goodTarget = { kind: 'win', hwnd: 1 };
   const good = mkPlatform({ ok: true, id: 1 });
-  const rGood = await pasteWith(good.platform, { kind: 'win', hwnd: 1 });
+  const rGood = await pasteWith(good.platform, goodTarget);
   check('确认通过 → ok 且恰好发一次键',
-    rGood?.ok === true && good.calls.send === 1,
+    rGood?.ok === true && good.calls.send === 1 && good.calls.target === goodTarget,
     JSON.stringify({ r: rGood, send: good.calls.send }));
 
   const noTarget = mkPlatform({ ok: true, id: 1 });

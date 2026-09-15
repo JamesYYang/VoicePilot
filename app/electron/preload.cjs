@@ -105,6 +105,19 @@ contextBridge.exposeInMainWorld('voicepilot', {
     return ipcRenderer.invoke('vp:adopt/paste');
   },
 
+  /**
+   * 采纳写回成功后关条。返回 { closed:false } 表示状态已被用户抢走（写回期间自己关了
+   * 条 / 连按快捷键开了下一段）—— 此时调用方什么都不要做，也不要还键盘。
+   */
+  closeAdoptBar() {
+    return ipcRenderer.invoke('vp:adopt/close');
+  },
+
+  /** 拆完编辑区之后再调：把键盘还给目标应用。 */
+  restoreAdoptFocus() {
+    return ipcRenderer.invoke('vp:adopt/restore-focus');
+  },
+
   /** @param cb 收到 (state, notice, truncated) */
   onState(cb) {
     return subscribe('vp:state', cb);
