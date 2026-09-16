@@ -8,19 +8,30 @@
 > [`../server/config-endpoint/README.md`](../server/config-endpoint/README.md)。本文件只给**顺序、命令、闸门与处置**。
 >
 > **本次执行日**：2026-09-16 —— 验的是 `2590057` 那批 macOS 采纳写回修复（+ `40d1655` 文档同步），目标是首次发出可用的试用包。
+>
+> **✅ 执行结果（2026-09-16）：全部走通，无一项触发第五节的处置。**
+>
+> - **第 0 步**：已 push，Mac 上 `git pull` 后 `git log -1` = `2996dc7`（含本清单本身），期望的 `40d1655` 或更新成立。
+> - **一、Mac 复验**：阶段 0 门禁与手册预期**完全一致**（`tsc` 干净、SM **77**/77、STORE / SHORTCUT / I18N 全过、INJECT **24**/24、UI **138**/138、BAR **17**/17）；阶段 1–4 通过；**阶段 5（打包 `.app`，从 Finder 启动）通过**。
+> - **5.2 降级触发点未触发**：打包版 `.node` 能 `dlopen`，**没有**加 `afterPack` 的 adhoc 签名。→ Plan 2B 的 macOS 侧按「完整实现」收口，不做纯剪贴板降级。
+> - **6.1**：打包版**不弹**「设置 API Key」表单。
+> - **二、端点**：内网端点已部署，`/config` 带 token 200 / 不带 401 如期。
+> - **三、四、打包与分发**：Windows（`dist:win:portable`）与 Mac（`dist:mac` → `VoicePilot.app` + dmg）均已打出，**两条平台的包都已发给同事**。
+> - **没有需要特别记录的观察项**：深链可跳到辅助功能页、授权后无需重启即生效、终端与 Dock 行为、右下角点击均符合预期。
+> - 逐条回填见 §七；细粒度结论在四本手册的状态表里。
 
 ---
 
 ## 第 0 步：出发前（Windows 侧，5 分钟）
 
-- [ ] **`git push`**。不推的话 Mac 上 `git pull` 只能拿到旧代码，你会测到**修之前**的版本。
+- [x] **`git push`**。不推的话 Mac 上 `git pull` 只能拿到旧代码，你会测到**修之前**的版本。
       核对：`git log --oneline origin/main..HEAD` 应为空。
-- [ ] 备好 **`app/electron/endpoint.built.json`**：`endpoint` 必须是**完整 URL 含 `/config`**
+- [x] 备好 **`app/electron/endpoint.built.json`**：`endpoint` 必须是**完整 URL 含 `/config`**
       （写成 `https://host` 会每台机器 404）+ 真 token。
       ⚠️ 该文件在 `.gitignore`，**不跟 push 走** → **打包的那台机器上必须各有一份**（Windows 与 Mac 都要）。
-- [ ] 备好服务端材料：`VP_CONFIG_TOKEN` / `VP_DASHSCOPE_API_KEY` / `VP_DASHSCOPE_WORKSPACE_ID` /
+- [x] 备好服务端材料：`VP_CONFIG_TOKEN` / `VP_DASHSCOPE_API_KEY` / `VP_DASHSCOPE_WORKSPACE_ID` /
       TLS 证书与私钥路径 / `VP_CONFIG_VERSION`。
-- [ ] 定好内网域名与端口（默认 `8443`）。
+- [x] 定好内网域名与端口（默认 `8443`）。
 
 ---
 
@@ -59,12 +70,12 @@ export VP_PORT=8443
 node server/config-endpoint/server.js        # 建议照 README 配 systemd 开机自启
 ```
 
-- [ ] ⚠️ **没配证书时服务是裸 HTTP 且只绑 `127.0.0.1`** —— 网关不在同一台机器上就**必须**配证书。
+- [x] ⚠️ **没配证书时服务是裸 HTTP 且只绑 `127.0.0.1`** —— 网关不在同一台机器上就**必须**配证书。
       Key 明文过网不可接受，内网也不放宽。
-- [ ] 前台验证：`curl -H "X-VP-Token: $VP_CONFIG_TOKEN" https://<内网域名>/config`
+- [x] 前台验证：`curl -H "X-VP-Token: $VP_CONFIG_TOKEN" https://<内网域名>/config`
       → 期望 **200 + JSON**；`curl https://<内网域名>/config` → 期望 **401**。
-- [ ] 自测：`node server/config-endpoint/test.mjs`。
-- [ ] **顺序**：把这一步放在**打包之前** —— 这样打包后的冒烟能顺带把 6.1（不弹 Key 表单）验掉。
+- [x] 自测：`node server/config-endpoint/test.mjs`。
+- [x] **顺序**：把这一步放在**打包之前** —— 这样打包后的冒烟能顺带把 6.1（不弹 Key 表单）验掉。
 
 ---
 
@@ -77,14 +88,14 @@ npm run dist:win:portable     # 发同事用便携单文件版；要安装包则
 
 - `prepack-check` 会拦住缺失 / 占位 / 非 https / URL 形态不对 —— 宁可在这里失败一次，
   也不要打出一个「装完拿不到 Key」的包。
-- [ ] 在**干净机器**上冒烟一次：双击即用、**不弹** Key 表单、说一句能上屏。
+- [x] 在**干净机器**上冒烟一次：双击即用、**不弹** Key 表单、说一句能上屏。
 
 ---
 
 ## 四、打包 Mac + 分发
 
 - 产物：`app/release/mac*/VoicePilot.app` + `VoicePilot-0.1.0.dmg`（由阶段 5 的 `dist:mac` 打出）。
-- [ ] 未做 Developer ID 签名与公证 → **首次打开要「右键 → 打开」**，这条必须写进发给同事的消息里。
+- [x] 未做 Developer ID 签名与公证 → **首次打开要「右键 → 打开」**，这条必须写进发给同事的消息里。
 
 **给同事的消息里必须有三条**：
 
@@ -136,9 +147,9 @@ npm run dist:win:portable     # 发同事用便携单文件版；要安装包则
 
 跑完按项目惯例把结论回填，避免下次又分不清「验过没有」：
 
-- [ ] [`macos-test-runbook.md`](macos-test-runbook.md) 的阶段表 / §八
-- [ ] [`adopt-injection-test-runbook.md`](adopt-injection-test-runbook.md) §一（采纳写回状态表 + §十判据）
-- [ ] [`common-phrases-test-runbook.md`](common-phrases-test-runbook.md) §一（F16 状态表 + §十判据）
-- [ ] [`plans/2026-09-05-voicepilot-prd.md`](plans/2026-09-05-voicepilot-prd.md) §8 的进度条目
-- [ ] 若阶段 5 这次真的跑了：把上述文档里**「阶段 5 未做」/「控制台启动，替代不了」**那几处**翻过来**
+- [x] [`macos-test-runbook.md`](macos-test-runbook.md) 的阶段表 / §八
+- [x] [`adopt-injection-test-runbook.md`](adopt-injection-test-runbook.md) §一（采纳写回状态表 + §十判据）
+- [x] [`common-phrases-test-runbook.md`](common-phrases-test-runbook.md) §一（F16 状态表 + §十判据）
+- [x] [`plans/2026-09-05-voicepilot-prd.md`](plans/2026-09-05-voicepilot-prd.md) §8 的进度条目
+- [x] 若阶段 5 这次真的跑了：把上述文档里**「阶段 5 未做」/「控制台启动，替代不了」**那几处**翻过来**
       （检索这两个串即可定位）

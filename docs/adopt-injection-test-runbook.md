@@ -17,13 +17,17 @@
 | `uintptr_t` / `uint64_t` / `intptr_t` 返回值类型 | **已实测（Windows 开发机）** | 返回 **`number`**；`void*` 返回 `bigint`。HWND 直接用 `!==` 比较 |
 | asarUnpack 新 glob 让 `.node` 移出 asar | **已实测（Windows 开发机，A/B）** | `electron-builder --win --dir` + `-c.asar.smartUnpack=false`：旧 glob `node_modules/koffi/**` 不命中（koffi 3.x 的原生二进制在 `@koromix/koffi-<plat>-<arch>/`），`.node` 留在 asar 内；新 glob `@koromix/**` 命中，asar 缩小约 1.04 MB，产物落在 `app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node`（1,036,800 B） |
 | 自测（主进程注入 19/19、状态机 41/41、界面 88/88、i18n 三语键齐、typecheck 干净） | **已实测（Windows 开发机）** | 只覆盖纯函数 / 编排顺序 / 界面分支，**不含真实置前与粘贴**；注入套件含 `INPUT`(40B) / `GUITHREADINFO`(72B) 两条结构体尺寸断言 |
-| **真实置前 + 粘贴（记事本 / 浏览器 / 终端 / Office）** | **Windows 已验（2026-09-13）；macOS 已跑一轮、修后待复验（2026-09-15）** | 2026-09-13 Windows 真机：Word / 浏览器 / 终端采纳均写回成功，且**光标留在目标应用内**（无需再点一下）。**2026-09-15 macOS 真机（控制台启动）**暴露两个问题 —— ① **回填不了**：只给 V 贴 Command 标志再丢进 HID tap，修饰键常还没生效、事件还可能贴回悬浮条自己，而成功判据只看前台 pid → 改为整串 `[⌘↓ V↓ V↑ ⌘↑]` 并优先 `CGEventPostToPid` 投目标 pid；② **回填成功、条也关了，目标应用却拿不到焦点** → 改为「先关条 → 等编辑区拆完 → 再还键盘」，且 macOS 空闲态窗口直接 `hide()`。两者已在 `2590057` 修掉，**修后版本尚未复验** |
-| **整个 macOS 实现**（`objc_msgSend` 各签名的声明、`AXIsProcessTrusted` 符号解析、`frontPid()`、自守、`activateWithOptions:` / `yieldActivationToApplication:`、`CGEventPost` / `CGEventPostToPid`） | **已跑一轮（2026-09-15，控制台启动）；修后待复验** | macOS 上已真实执行：`koffi` 能加载并调用（阶段 0 的 `VP_INJECT_SELFTEST=1` 即实证），置前与发键都动过；暴露的问题见上一行。哪条分支实际命中，可用 `VP_INJECT_DEBUG=1` 从「置前 / 置前后 / 发键: pid=…」几行日志确认 |
-| **打包版能否 `dlopen` 外置的 `.node`** | **Windows 已实测；macOS arm64 未验** | Windows：2026-09-13 从 HEAD 重打 `--dir` 包后直接跑 `release/win-unpacked/VoicePilot.exe`（带 `VP_INJECT_SELFTEST=1`）→ **17/17（当时断言数）、退出码 0**，包内取到真实前台 HWND `{"kind":"win","hwnd":393822}` ⇒ `.node` 确实从 asar 外被 dlopen 并调用成功（不再只是「文件移动了」）。**macOS 同一问题仍未验**，见用例 7 ② |
-| **A2 回归**（新增 `start()` 时同步捕获后，聆听三态仍不抢焦点） | **macOS 已跑一轮（2026-09-15）；打包版待复验** | 界面自测覆盖不到真实焦点，只能真机验：macOS 那轮通过（= 主手册 `docs/macos-test-runbook.md` 的 2.3）。**打包版按阶段 5 / 用例 5.3 仍需再跑一次** |
+| **真实置前 + 粘贴（记事本 / 浏览器 / 终端 / Office）** | **Windows 已验（2026-09-13）；macOS 已验（2026-09-16，打包版）** | 2026-09-13 Windows 真机：Word / 浏览器 / 终端采纳均写回成功，且**光标留在目标应用内**（无需再点一下）。**2026-09-15 macOS 真机（控制台启动）**暴露两个问题 —— ① **回填不了**：只给 V 贴 Command 标志再丢进 HID tap，修饰键常还没生效、事件还可能贴回悬浮条自己，而成功判据只看前台 pid → 改为整串 `[⌘↓ V↓ V↑ ⌘↑]` 并优先 `CGEventPostToPid` 投目标 pid；② **回填成功、条也关了，目标应用却拿不到焦点** → 改为「先关条 → 等编辑区拆完 → 再还键盘」，且 macOS 空闲态窗口直接 `hide()`。两者已在 `2590057` 修掉，**2026-09-16 在打包版（从 Finder 启动）复验通过，两个问题都不再复现** |
+| **整个 macOS 实现**（`objc_msgSend` 各签名的声明、`AXIsProcessTrusted` 符号解析、`frontPid()`、自守、`activateWithOptions:` / `yieldActivationToApplication:`、`CGEventPost` / `CGEventPostToPid`） | **已验（2026-09-16，打包版）；2026-09-15 另有控制台启动一轮** | macOS 上已真实执行：`koffi` 能加载并调用（阶段 0 的 `VP_INJECT_SELFTEST=1` 即实证），置前与发键都动过；修后版本已于 2026-09-16 在打包版通过。哪条分支实际命中，可用 `VP_INJECT_DEBUG=1` 从「置前 / 置前后 / 发键: pid=…」几行日志确认 |
+| **打包版能否 `dlopen` 外置的 `.node`** | **Windows 已实测（2026-09-13）；macOS arm64 已验（2026-09-16）** | Windows：2026-09-13 从 HEAD 重打 `--dir` 包后直接跑 `release/win-unpacked/VoicePilot.exe`（带 `VP_INJECT_SELFTEST=1`）→ **17/17（当时断言数）、退出码 0**，包内取到真实前台 HWND `{"kind":"win","hwnd":393822}` ⇒ `.node` 确实从 asar 外被 dlopen 并调用成功（不再只是「文件移动了」）。**macOS 已于 2026-09-16 在打包版（从 Finder 启动）验过**：`.node` 能 `dlopen`，**且未加 `afterPack` 的 adhoc 签名** ⇒ 用例 7 ② 的降级条件**未触发** |
+| **A2 回归**（新增 `start()` 时同步捕获后，聆听三态仍不抢焦点） | **已验（2026-09-15 开发模式 + 2026-09-16 打包版）** | 界面自测覆盖不到真实焦点，只能真机验：macOS 开发模式那轮通过（= 主手册 `docs/macos-test-runbook.md` 的 2.3），**打包版已按阶段 5 / 用例 5.3 于 2026-09-16 复跑通过** |
 | `SetForegroundWindow` 被前台锁拒绝的频率、`AttachThreadInput` 兜底是否够用 | **已观测（Windows 真机）；未系统测量** | 真机日志显示前台在约 13–48ms 内到位、`SetForegroundWindow` 直接成功，**兜底未触发**；样本有限，不能据此删兜底 |
 
-> **Windows 侧的「真实置前 + 粘贴」已于 2026-09-13 真机通过**（本手册最有分量的一条，见状态表）。**macOS 侧已于 2026-09-15 跑过一轮**（控制台启动），暴露的两个问题已在 `2590057` 修掉 —— 但**修后的版本尚未复验**，且那一轮是控制台启动、**不能替代打包版**。仍未验的还有：打包版 `dlopen` 的 macOS 侧（用例 7 ②），以及 `2590057` 新行为的那个用例（主手册 2.6「写回期间用户抢走了状态」）。**全部打勾前不得声称 Plan 2B 完成。**
+> **Windows 侧的「真实置前 + 粘贴」已于 2026-09-13 真机通过**（本手册最有分量的一条，见状态表）。**macOS 侧：2026-09-15 控制台启动跑了第一轮**，暴露的两个问题在 `2590057` 修掉后，**已在 2026-09-16 用打包 `.app`（从 Finder 启动）复验通过** —— 修后复验与「打包版焦点类复跑」两个缺口都已关闭，**用例 7 的 macOS 侧（含头号问题：未签名 `.node` 能否 `dlopen`）也随之结清，降级条件未触发**。
+>
+> **仍未验的只剩两处**：
+> - **用例 3（Windows 管理员权限窗口）** —— 从头到尾没验过，与 Mac 无关，见第十节；
+> - 用例 6b 的 **Windows UIPI / 逐字注入退路**等已接受的代价（第十三节），本期本就不做。
 
 ---
 
@@ -82,7 +86,7 @@ macOS `⌥Space`；Windows `Ctrl+Shift+Space`（F7 可配，若改过以实际�
    > 深链 URL 用的是经典写法 `x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility`。macOS 13+ 系统设置改版后若跳不到辅助功能页，**这也是要记的坑**（备用写法见该 handler 注释）。
 5. 授权后：回到目标应用、**不重启 VoicePilot**，再点一次「采纳」。
 6. **期望**：文本出现在目标应用，悬浮条关闭。
-   - ⚠️ **待验**：授权后是否需要重启应用 / 重新触发一次快捷键才生效。`AXIsProcessTrusted()` 理论上实时反映 TCC 状态，但**没实测过**。若还提示 `permission`，说明进程内缓存了状态，如实记录。
+   - ✅ **已实测（2026-09-16，打包版）**：授权后**不需要**重启应用、也不需要重新触发快捷键，第一次点「采纳」即成功 —— `AXIsProcessTrusted()` 如实实时反映 TCC 状态，进程内没有缓存状态。
 
 **记录**：是否出现提示、提示原文、深链是否跳到正确页面、授权后第一次点采纳是否就成功。
 
@@ -177,7 +181,7 @@ macOS `⌥Space`；Windows `Ctrl+Shift+Space`（F7 可配，若改过以实际�
 **期望**：提示「目标窗口已关闭，已复制到剪贴板，请手动粘贴」，悬浮条**不关闭**。
 判 `stale` 的机制不同：Windows 走 `IsWindow` 为假；macOS 走 `runningApplicationWithProcessIdentifier:` 返回 nil。
 
-⚠️ **macOS 特别观察项**（**按实现推断，未验**）：如果关掉的是**单个窗口**而应用进程还在，`runningApplicationWithProcessIdentifier:` 仍会返回非 nil → 不会判 `stale`，会走「置前成功 → 发键」但文本无处可落。**这条是从代码推断的，没在任何机器上跑过**，请按上面的步骤实测并记录实际表现。
+✅ **macOS 特别观察项（2026-09-16 已实测，与推断一致）**：只关掉**单个窗口**而应用进程还在时，`runningApplicationWithProcessIdentifier:` 仍返回非 nil → **不会判 `stale`**，会走「置前成功 → 发键」而文本无处可落。这条原先只是按代码推断，现已在真机确认，**属已知行为，不要当新缺陷报**。
 
 ---
 
@@ -228,6 +232,8 @@ VoicePilot.app/Contents/Resources/app.asar.unpacked/node_modules/@koromix/koffi-
 
 ### 降级条件（触发就要回头改决策，不要硬上）
 
+> ✅ **2026-09-16：①② 均已成立，降级未触发。** macOS arm64 打包版（从 Finder 启动）的 `.node` 能 `dlopen`，**没有**加 `afterPack` adhoc 签名；打包版里 2.2 的 TextEdit 那一格也过了。本条自此是**回归判据**（改 koffi 版本、`asarUnpack` glob 或签名配置后必须重跑），不再是「待验的未知数」。
+
 **① ② 任一不成立** → 触发 `docs/superpowers/specs/2026-09-12-trial-feedback-design.md` §2.4 的降级：**退回纯剪贴板方案**（去掉「采纳」，或把它降级为「复制并提示手动粘贴」）。
 按本项目惯例：先回头改设计文档的决策表，再动实现。
 
@@ -235,17 +241,22 @@ VoicePilot.app/Contents/Resources/app.asar.unpacked/node_modules/@koromix/koffi-
 
 ## 十、完整跑完的判据
 
-- [ ] 用例 1（macOS）：未授权 → 授权 → 成功，一轮走通
-- [ ] 用例 2：Win + Mac 各一遍矩阵，含终端与 Office（未装记「未测」）
+- [x] 用例 1（macOS）：未授权 → 授权 → 成功，一轮走通
+- [x] 用例 2：Win + Mac 各一遍矩阵，含终端与 Office（未装记「未测」）
 - [ ] 用例 3：管理员窗口失败可感知，剪贴板留文本
-- [ ] 用例 4：A2 回归，聆听三态不抢焦点（**打包版再跑一遍**）
-- [ ] 用例 5：剪贴板从不还原，成功与失败路径各验一次
-- [ ] 用例 6：最小化能还原并粘贴；已关闭报 `stale` 且不关闭悬浮条
-- [ ] 用例 7：Win 与 Mac 打包版各一次，`.node` 能加载
+- [x] 用例 4：A2 回归，聆听三态不抢焦点（**打包版再跑一遍**）
+- [x] 用例 5：剪贴板从不还原，成功与失败路径各验一次
+- [x] 用例 6：最小化能还原并粘贴；已关闭报 `stale` 且不关闭悬浮条
+- [x] 用例 7：Win 与 Mac 打包版各一次，`.node` 能加载
 
 全部打勾后，把结果回填 PRD §8 M5-A 的准出栏与本节状态表。
 
-> **当前状态（2026-09-15）**：用例 1 / 2 / 4 / 5 / 6 已在 macOS 真机（**控制台启动**）跑过一轮，用例 2 另有 Windows 2026-09-13 的结论。**仍未做**：用例 3（Windows 管理员窗口，一直没验）、用例 7 的 macOS 打包版、**`2590057` 修后版本的复验**、以及**打包版（主手册阶段 5）的焦点类复跑**。所以上面这些框**一律还不该打勾**。
+> **当前状态（2026-09-16）**：**除用例 3 外全部打勾。**
+> - 用例 1 / 4 / 5 / 6 的 macOS 侧：2026-09-15 控制台启动跑过一轮，**2026-09-16 用打包 `.app`（从 Finder 启动）复验通过** —— 这是 `2590057` 修后版本的第一次真机复验，也是打包版的焦点类复跑（主手册阶段 5 / 用例 5.3）。
+> - 用例 2：Windows 2026-09-13、macOS 2026-09-15/16。
+> - 用例 7：Windows 2026-09-13；**macOS 2026-09-16 打包版通过，且未加 adhoc 签名 → 降级条件未触发**。
+>
+> ⚠️ **用例 3（Windows 管理员权限窗口）是本手册唯一的空洞** —— 它不在 `docs/release-checklist.md` 的清单里（那份清单只覆盖「发 Mac 试用包」这条线），从头到尾没验过。它验的是「失败可感知」，属第十三节已接受的代价，**不影响本次发的包**；补验步骤见第五节。
 
 ---
 
